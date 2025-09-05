@@ -3,7 +3,7 @@ class Wheels < Formula
   homepage "https://github.com/wheels-dev/homebrew-wheels"
   url "file:///dev/null"
   sha256 "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  version "1.0.4"
+  version "1.0.5"
   
   depends_on "commandbox"
 
@@ -22,7 +22,7 @@ class Wheels < Formula
       fi
       
       # Check if Wheels CLI tools are installed, install if needed
-      if box help wheels 2>&1 | grep -q "Command \[wheels\] not found"; then
+      if box help wheels 2>&1 | grep -q "Command.*not found"; then
         echo "Installing Wheels CLI tools for CommandBox..."
         if ! box install wheels-cli; then
           echo "Error: Failed to install Wheels CLI tools"
@@ -36,7 +36,7 @@ class Wheels < Formula
       if [[ "$#" -eq 1 && ("$1" == "--help" || "$1" == "-h") ]]; then
         exec box help wheels
       elif [[ "$#" -eq 1 && ("$1" == "--version" || "$1" == "-v") ]]; then
-        echo "wheels wrapper version 1.0.4"
+        echo "wheels wrapper version 1.0.5"
         echo "Powered by:"
         box version
         exit 0
