@@ -1,7 +1,6 @@
 class Wheels < Formula
   desc "CLI wrapper for Wheels MVC framework"
   homepage "https://github.com/wheels-dev/homebrew-wheels"
-  url "https://github.com/wheels-dev/homebrew-wheels.git"
   version "1.0.0"
   
   depends_on "commandbox"
