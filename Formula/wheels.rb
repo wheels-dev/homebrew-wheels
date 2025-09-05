@@ -3,7 +3,7 @@ class Wheels < Formula
   homepage "https://github.com/wheels-dev/homebrew-wheels"
   url "file:///dev/null"
   sha256 "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  version "1.0.1"
+  version "1.0.2"
   
   depends_on "commandbox"
 
@@ -30,6 +30,16 @@ class Wheels < Formula
           exit 1
         fi
         echo "Wheels CLI tools installed successfully"
+      fi
+      
+      # Handle special cases for help and version
+      if [[ "$#" -eq 1 && ("$1" == "--help" || "$1" == "-h") ]]; then
+        exec box help wheels
+      elif [[ "$#" -eq 1 && ("$1" == "--version" || "$1" == "-v") ]]; then
+        echo "wheels wrapper version $version"
+        echo "Powered by:"
+        box version
+        exit 0
       fi
       
       # Convert command line arguments from standard --parameter=value format
