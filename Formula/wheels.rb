@@ -7,6 +7,9 @@ class Wheels < Formula
   depends_on "commandbox"
 
   def install
+    # Install the Wheels CLI tools for CommandBox
+    system "box", "install", "wheels-cli"
+    
     # Create the wheels wrapper script
     (bin/"wheels").write <<~EOS
       #!/bin/bash
@@ -20,8 +23,35 @@ class Wheels < Formula
         exit 1
       fi
       
-      # Pass all arguments to box wheels
-      exec box wheels "$@"
+      # Check if Wheels CLI tools are installed
+      if ! box help wheels &> /dev/null; then
+        echo "Error: Wheels CLI tools are not installed in CommandBox"
+        echo "Please install Wheels CLI: box install wheels-cli"
+        exit 1
+      fi
+      
+      # Convert command line arguments from standard --parameter=value format
+      # to CommandBox parameter=value format, and handle boolean flags
+      converted_args=()
+      for arg in "$@"; do
+        if [[ "$arg" =~ ^--([^=]+)=(.*)$ ]]; then
+          # Convert --parameter=value to parameter=value
+          converted_args+=("${BASH_REMATCH[1]}=${BASH_REMATCH[2]}")
+        elif [[ "$arg" =~ ^--no([A-Z].*)$ ]]; then
+          # Convert --noFlag to flag=false
+          flag_name=$(echo "${BASH_REMATCH[1]}" | sed 's/^./\L&/')
+          converted_args+=("${flag_name}=false")
+        elif [[ "$arg" =~ ^--([a-zA-Z].*)$ ]]; then
+          # Convert --flag to flag=true
+          converted_args+=("${BASH_REMATCH[1]}=true")
+        else
+          # Pass through other arguments unchanged
+          converted_args+=("$arg")
+        fi
+      done
+      
+      # Pass converted arguments to box wheels
+      exec box wheels "${converted_args[@]}"
     EOS
     
     # Make the script executable
