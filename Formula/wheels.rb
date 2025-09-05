@@ -6,9 +6,6 @@ class Wheels < Formula
   depends_on "commandbox"
 
   def install
-    # Install the Wheels CLI tools for CommandBox
-    system "box", "install", "wheels-cli"
-    
     # Create the wheels wrapper script
     (bin/"wheels").write <<~EOS
       #!/bin/bash
@@ -22,11 +19,15 @@ class Wheels < Formula
         exit 1
       fi
       
-      # Check if Wheels CLI tools are installed
-      if ! box help wheels &> /dev/null; then
-        echo "Error: Wheels CLI tools are not installed in CommandBox"
-        echo "Please install Wheels CLI: box install wheels-cli"
-        exit 1
+      # Check if Wheels CLI tools are installed, install if needed
+      if ! box help wheels &> /dev/null 2>&1; then
+        echo "Installing Wheels CLI tools for CommandBox..."
+        if ! box install wheels-cli; then
+          echo "Error: Failed to install Wheels CLI tools"
+          echo "Please try manually: box install wheels-cli"
+          exit 1
+        fi
+        echo "Wheels CLI tools installed successfully"
       fi
       
       # Convert command line arguments from standard --parameter=value format
