@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(box version:*)",
+      "Bash(brew uninstall:*)",
+      "Bash(brew install:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(brew untap:*)",
+      "Bash(brew tap:*)",
+      "Bash(wheels:*)",
+      "Bash(box install:*)",
+      "Bash(box help:*)",
+      "Bash(brew upgrade:*)",
+      "Bash(brew reinstall:*)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(box uninstall:*)",
+      "Bash(echo \"Exit code: $?\")",
+      "Bash(bash:*)",
+      "Read(//opt/homebrew/Cellar/wheels/1.0.5/bin/**)",
+      "Read(//opt/homebrew/Cellar/wheels/1.0.6/bin/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
