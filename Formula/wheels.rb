@@ -1,88 +1,54 @@
 class Wheels < Formula
-  desc "CLI wrapper for Wheels MVC framework"
-  homepage "https://github.com/wheels-dev/homebrew-wheels"
+  desc "CLI for Wheels MVC framework (powered by LuCLI)"
+  homepage "https://wheels.dev"
   url "file:///dev/null"
   sha256 "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  version "1.0.6"
-  
-  depends_on "commandbox"
+  version "2.0.0"
+
+  depends_on "lucli"
 
   def install
     # Create the wheels wrapper script
     (bin/"wheels").write <<~EOS
       #!/bin/bash
-      # Wheels CLI wrapper for CommandBox
-      # Passes all arguments to 'box wheels'
-      
-      # Check if CommandBox is available
-      if ! command -v box &> /dev/null; then
-        echo "Error: CommandBox is required but not found in PATH"
-        echo "Please install CommandBox: brew install commandbox"
+      # Wheels CLI wrapper — delegates to LuCLI
+      #
+      # LuCLI handles standard CLI argument conventions natively,
+      # so no argument conversion is needed (unlike the old CommandBox wrapper).
+
+      if ! command -v lucli &> /dev/null; then
+        echo "Error: LuCLI is required but not found in PATH"
+        echo "Please install LuCLI: brew install lucli"
         exit 1
       fi
-      
-      # Check if Wheels CLI tools are installed, install if needed
-      if box help wheels 2>&1 | grep -q "Command.*not found"; then
-        echo "Installing Wheels CLI tools for CommandBox..."
-        if ! box install wheels-cli; then
-          echo "Error: Failed to install Wheels CLI tools"
-          echo "Please try manually: box install wheels-cli"
+
+      # Check if Wheels module is installed, install if needed
+      if ! lucli modules list 2>/dev/null | grep -q "wheels"; then
+        echo "Installing Wheels CLI module for LuCLI..."
+        if ! lucli modules install wheels; then
+          echo "Error: Failed to install Wheels CLI module"
+          echo "Please try manually: lucli modules install wheels"
           exit 1
         fi
-        echo "Wheels CLI tools installed successfully"
+        echo "Wheels CLI module installed successfully"
       fi
-      
-      # Handle special cases for help and version
-      if [[ "$#" -eq 1 && ("$1" == "--help" || "$1" == "-h") ]]; then
-        exec box help wheels
-      elif [[ "$#" -eq 1 && ("$1" == "--version" || "$1" == "-v") ]]; then
-        echo "wheels wrapper version 1.0.6"
-        echo "Powered by:"
-        box version
-        exit 0
-      fi
-      
-      # Special handling for server commands - redirect to box server
-      if [[ "$#" -ge 1 && "$1" == "server" ]]; then
-        # Remove "server" from arguments and pass remaining to box server
-        shift
-        exec box server "$@"
-      fi
-      
-      # Convert command line arguments from standard --parameter=value format
-      # to CommandBox parameter=value format, and handle boolean flags
-      converted_args=()
-      for arg in "$@"; do
-        if [[ "$arg" =~ ^--([^=]+)=(.*)$ ]]; then
-          # Convert --parameter=value to parameter=value
-          converted_args+=("${BASH_REMATCH[1]}=${BASH_REMATCH[2]}")
-        elif [[ "$arg" =~ ^--no([A-Z].*)$ ]]; then
-          # Convert --noFlag to flag=false
-          flag_name=$(echo "${BASH_REMATCH[1]}" | sed 's/^./\L&/')
-          converted_args+=("${flag_name}=false")
-        elif [[ "$arg" =~ ^--([a-zA-Z].*)$ ]]; then
-          # Convert --flag to flag=true
-          converted_args+=("${BASH_REMATCH[1]}=true")
-        else
-          # Pass through other arguments unchanged
-          converted_args+=("$arg")
-        fi
-      done
-      
-      # Pass converted arguments to box wheels
-      exec box wheels "${converted_args[@]}"
+
+      exec lucli wheels "$@"
     EOS
-    
-    # Make the script executable
+
     chmod 0755, bin/"wheels"
   end
 
+  def post_install
+    # Pre-install the Wheels module so the first run is instant
+    system "lucli", "modules", "install", "wheels"
+  end
+
   test do
-    # Test that the command exists and has correct permissions
     assert_predicate bin/"wheels", :exist?
     assert_predicate bin/"wheels", :executable?
-    
-    # Test the help output (will fail gracefully if CommandBox isn't available)
-    system "#{bin}/wheels", "--version" rescue nil
+
+    # Verify the wrapper script references lucli
+    assert_match "lucli", (bin/"wheels").read
   end
 end
