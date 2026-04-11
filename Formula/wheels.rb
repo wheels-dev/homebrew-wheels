@@ -1,88 +1,79 @@
 class Wheels < Formula
-  desc "CLI wrapper for Wheels MVC framework"
-  homepage "https://github.com/wheels-dev/homebrew-wheels"
-  url "file:///dev/null"
-  sha256 "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  version "1.0.6"
-  
-  depends_on "commandbox"
+  desc "CLI for the Wheels MVC framework — powered by LuCLI"
+  homepage "https://wheels.dev"
+  license "Apache-2.0"
+
+  LUCLI_VERSION = "0.3.3"
+  MODULE_VERSION = "4.0.0+50"
+
+  if OS.mac?
+    url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
+    sha256 "6abf3fa8637ad66ef11592a91649a91b27c620cbaa7aaeb434725e1c15c6b676"
+  elsif OS.linux?
+    url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-linux"
+    sha256 "3c74ca291b8df26cc4c1e77c8162755b604acc03f6e0fa172602826d35a18126"
+  end
+
+  # Module tarball not yet available as release asset — placeholder until first
+  # wheels release includes it. The auto-update workflow will fill in the real
+  # SHA once the asset exists.
+  #
+  # resource "wheels_module" do
+  #   url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-module-#{MODULE_VERSION}.tar.gz"
+  #   sha256 "PLACEHOLDER_MODULE_SHA"
+  # end
+
+  depends_on "openjdk@21"
 
   def install
-    # Create the wheels wrapper script
+    binary = Dir["*"].first
+    libexec.install binary => "wheels"
+    chmod 0755, libexec/"wheels"
+
+    # Module resource will be staged here once available:
+    # resource("wheels_module").stage do
+    #   (share/"wheels/module").install Dir["*"]
+    # end
+    #
+    # (share/"wheels").mkpath
+    # (share/"wheels/.module-version").write MODULE_VERSION
+
     (bin/"wheels").write <<~EOS
       #!/bin/bash
-      # Wheels CLI wrapper for CommandBox
-      # Passes all arguments to 'box wheels'
-      
-      # Check if CommandBox is available
-      if ! command -v box &> /dev/null; then
-        echo "Error: CommandBox is required but not found in PATH"
-        echo "Please install CommandBox: brew install commandbox"
-        exit 1
-      fi
-      
-      # Check if Wheels CLI tools are installed, install if needed
-      if box help wheels 2>&1 | grep -q "Command.*not found"; then
-        echo "Installing Wheels CLI tools for CommandBox..."
-        if ! box install wheels-cli; then
-          echo "Error: Failed to install Wheels CLI tools"
-          echo "Please try manually: box install wheels-cli"
-          exit 1
+      BREW_PREFIX="#{HOMEBREW_PREFIX}/opt/wheels"
+      WHEELS_MODULE_SRC="$BREW_PREFIX/share/wheels/module"
+      WHEELS_MODULE_DST="$HOME/.wheels/modules/wheels"
+      WHEELS_VERSION_SRC="$BREW_PREFIX/share/wheels/.module-version"
+      WHEELS_VERSION_DST="$HOME/.wheels/modules/wheels/.module-version"
+
+      if [ -f "$WHEELS_VERSION_SRC" ]; then
+        src_ver=$(cat "$WHEELS_VERSION_SRC")
+        dst_ver=""
+        [ -f "$WHEELS_VERSION_DST" ] && dst_ver=$(cat "$WHEELS_VERSION_DST")
+        if [ "$src_ver" != "$dst_ver" ]; then
+          mkdir -p "$WHEELS_MODULE_DST"
+          cp -R "$WHEELS_MODULE_SRC/"* "$WHEELS_MODULE_DST/"
+          cp "$WHEELS_VERSION_SRC" "$WHEELS_VERSION_DST"
         fi
-        echo "Wheels CLI tools installed successfully"
       fi
-      
-      # Handle special cases for help and version
-      if [[ "$#" -eq 1 && ("$1" == "--help" || "$1" == "-h") ]]; then
-        exec box help wheels
-      elif [[ "$#" -eq 1 && ("$1" == "--version" || "$1" == "-v") ]]; then
-        echo "wheels wrapper version 1.0.6"
-        echo "Powered by:"
-        box version
-        exit 0
-      fi
-      
-      # Special handling for server commands - redirect to box server
-      if [[ "$#" -ge 1 && "$1" == "server" ]]; then
-        # Remove "server" from arguments and pass remaining to box server
-        shift
-        exec box server "$@"
-      fi
-      
-      # Convert command line arguments from standard --parameter=value format
-      # to CommandBox parameter=value format, and handle boolean flags
-      converted_args=()
-      for arg in "$@"; do
-        if [[ "$arg" =~ ^--([^=]+)=(.*)$ ]]; then
-          # Convert --parameter=value to parameter=value
-          converted_args+=("${BASH_REMATCH[1]}=${BASH_REMATCH[2]}")
-        elif [[ "$arg" =~ ^--no([A-Z].*)$ ]]; then
-          # Convert --noFlag to flag=false
-          flag_name=$(echo "${BASH_REMATCH[1]}" | sed 's/^./\L&/')
-          converted_args+=("${flag_name}=false")
-        elif [[ "$arg" =~ ^--([a-zA-Z].*)$ ]]; then
-          # Convert --flag to flag=true
-          converted_args+=("${BASH_REMATCH[1]}=true")
-        else
-          # Pass through other arguments unchanged
-          converted_args+=("$arg")
-        fi
-      done
-      
-      # Pass converted arguments to box wheels
-      exec box wheels "${converted_args[@]}"
+
+      export JAVA_HOME="#{Formula["openjdk@21"].opt_libexec}/openjdk.jdk/Contents/Home"
+      exec "$BREW_PREFIX/libexec/wheels" "$@"
     EOS
-    
-    # Make the script executable
     chmod 0755, bin/"wheels"
   end
 
+  def caveats
+    <<~EOS
+      Java 21 is required and has been installed as a dependency.
+
+      On first run, the Wheels module will be initialized in:
+        ~/.wheels/modules/wheels/
+    EOS
+  end
+
   test do
-    # Test that the command exists and has correct permissions
-    assert_predicate bin/"wheels", :exist?
     assert_predicate bin/"wheels", :executable?
-    
-    # Test the help output (will fail gracefully if CommandBox isn't available)
-    system "#{bin}/wheels", "--version" rescue nil
+    assert_predicate libexec/"wheels", :executable?
   end
 end

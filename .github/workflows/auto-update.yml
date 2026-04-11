@@ -1,0 +1,157 @@
+name: Auto-Update Formula
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-updates:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for updates
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Current versions from formula
+          CURRENT_LUCLI=$(grep "LUCLI_VERSION" Formula/wheels.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          CURRENT_MODULE=$(grep "MODULE_VERSION" Formula/wheels.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "current_lucli=$CURRENT_LUCLI" >> "$GITHUB_OUTPUT"
+          echo "current_module=$CURRENT_MODULE" >> "$GITHUB_OUTPUT"
+
+          # Latest LuCLI release
+          LATEST_LUCLI=$(gh release view --repo cybersonic/LuCLI --json tagName -q '.tagName' | sed 's/^v//')
+          echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
+
+          # Latest Wheels release with module tarball
+          LATEST_MODULE=$(gh release list --repo wheels-dev/wheels --limit 20 --json tagName,assets -q '
+            [.[] | select(.assets[].name | test("wheels-module.*\\.tar\\.gz"))] | .[0].tagName
+          ' | sed 's/^v//')
+          echo "latest_module=$LATEST_MODULE" >> "$GITHUB_OUTPUT"
+
+          # Determine if update needed
+          NEEDS_UPDATE="false"
+          if [ "$CURRENT_LUCLI" != "$LATEST_LUCLI" ] && [ -n "$LATEST_LUCLI" ]; then
+            NEEDS_UPDATE="true"
+            echo "LuCLI update: $CURRENT_LUCLI -> $LATEST_LUCLI"
+          fi
+          if [ "$CURRENT_MODULE" != "$LATEST_MODULE" ] && [ -n "$LATEST_MODULE" ]; then
+            NEEDS_UPDATE="true"
+            echo "Module update: $CURRENT_MODULE -> $LATEST_MODULE"
+          fi
+          echo "needs_update=$NEEDS_UPDATE" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA256 hashes
+        if: steps.check.outputs.needs_update == 'true'
+        id: hashes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LUCLI_VER="${{ steps.check.outputs.latest_lucli }}"
+          MODULE_VER="${{ steps.check.outputs.latest_module }}"
+
+          # LuCLI binaries
+          curl -sfL "https://github.com/cybersonic/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" -o /tmp/lucli-macos
+          MACOS_SHA=$(shasum -a 256 /tmp/lucli-macos | awk '{print $1}')
+          echo "macos_sha=$MACOS_SHA" >> "$GITHUB_OUTPUT"
+
+          curl -sfL "https://github.com/cybersonic/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" -o /tmp/lucli-linux
+          LINUX_SHA=$(shasum -a 256 /tmp/lucli-linux | awk '{print $1}')
+          echo "linux_sha=$LINUX_SHA" >> "$GITHUB_OUTPUT"
+
+          # Module tarball (may not exist yet)
+          MODULE_SHA=""
+          if [ -n "$MODULE_VER" ]; then
+            curl -sfL "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-module-${MODULE_VER}.tar.gz" -o /tmp/wheels-module.tar.gz && \
+              MODULE_SHA=$(shasum -a 256 /tmp/wheels-module.tar.gz | awk '{print $1}') || true
+          fi
+          echo "module_sha=$MODULE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Update formula
+        if: steps.check.outputs.needs_update == 'true'
+        env:
+          LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          MODULE_VER: ${{ steps.check.outputs.latest_module }}
+          MACOS_SHA: ${{ steps.hashes.outputs.macos_sha }}
+          LINUX_SHA: ${{ steps.hashes.outputs.linux_sha }}
+          MODULE_SHA: ${{ steps.hashes.outputs.module_sha }}
+        run: |
+          # Update version constants
+          sed -i '' "s/LUCLI_VERSION = \".*\"/LUCLI_VERSION = \"${LUCLI_VER}\"/" Formula/wheels.rb
+          sed -i '' "s/MODULE_VERSION = \".*\"/MODULE_VERSION = \"${MODULE_VER}\"/" Formula/wheels.rb
+
+          # Update SHA256 hashes using python for reliability
+          python3 << 'PYEOF'
+          import re, os
+          macos_sha = os.environ["MACOS_SHA"]
+          linux_sha = os.environ["LINUX_SHA"]
+          module_sha = os.environ["MODULE_SHA"]
+
+          with open("Formula/wheels.rb", "r") as f:
+              content = f.read()
+
+          # Replace SHA256 hashes in order: macOS, Linux, module
+          shas = list(re.finditer(r'sha256 "[a-fA-F0-9]+"', content))
+          if len(shas) >= 2:
+              content = content[:shas[1].start()] + f'sha256 "{linux_sha}"' + content[shas[1].end():]
+              content = content[:shas[0].start()] + f'sha256 "{macos_sha}"' + content[shas[0].end():]
+
+          # If module SHA available and resource block exists (commented or not), update it
+          if module_sha:
+              content = re.sub(
+                  r'#\s*sha256 "PLACEHOLDER_MODULE_SHA"',
+                  f'sha256 "{module_sha}"',
+                  content
+              )
+              # Uncomment the resource block if it was commented
+              content = re.sub(r'^\s*#\s*(resource "wheels_module")', r'  \1', content, flags=re.MULTILINE)
+              content = re.sub(r'^\s*#\s*(url "https://github.com/wheels-dev/wheels)', r'    \1', content, flags=re.MULTILINE)
+              content = re.sub(r'^\s*#\s*(sha256 "[a-fA-F0-9]+")', r'    \1', content, flags=re.MULTILINE)
+              content = re.sub(r'^\s*#\s*(end)\s*$', r'  \1', content, flags=re.MULTILINE)
+
+          with open("Formula/wheels.rb", "w") as f:
+              f.write(content)
+          PYEOF
+
+      - name: Create PR
+        if: steps.check.outputs.needs_update == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LUCLI_VER="${{ steps.check.outputs.latest_lucli }}"
+          MODULE_VER="${{ steps.check.outputs.latest_module }}"
+          BRANCH="auto-update/lucli-${LUCLI_VER}-module-${MODULE_VER}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add Formula/wheels.rb
+          git commit -m "chore: update to LuCLI ${LUCLI_VER}, module ${MODULE_VER}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "chore: update to LuCLI ${LUCLI_VER}, module ${MODULE_VER}" \
+            --body "Auto-update from upstream releases.
+
+          - LuCLI: ${{ steps.check.outputs.current_lucli }} -> ${LUCLI_VER}
+          - Module: ${{ steps.check.outputs.current_module }} -> ${MODULE_VER}" \
+            --label "auto-update"
+
+      - name: Enable auto-merge
+        if: steps.check.outputs.needs_update == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LUCLI_VER="${{ steps.check.outputs.latest_lucli }}"
+          MODULE_VER="${{ steps.check.outputs.latest_module }}"
+          PR_URL=$(gh pr list --head "auto-update/lucli-${LUCLI_VER}-module-${MODULE_VER}" --json url -q '.[0].url')
+          if [ -n "$PR_URL" ]; then
+            gh pr merge "$PR_URL" --auto --squash
+          fi

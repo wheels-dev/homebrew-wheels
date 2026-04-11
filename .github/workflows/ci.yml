@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - 'Formula/**'
+
+jobs:
+  audit:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Audit formula
+        run: brew audit --strict Formula/wheels.rb
+
+      - name: Install formula
+        run: brew install --build-from-source Formula/wheels.rb
+
+      - name: Test formula
+        run: brew test wheels
