@@ -4,7 +4,7 @@ class Wheels < Formula
   license "Apache-2.0"
 
   LUCLI_VERSION = "0.3.3"
-  MODULE_VERSION = "4.0.0+50"
+  MODULE_VERSION = "4.0.0-SNAPSHOT+1442"
 
   if OS.mac?
     url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
@@ -14,14 +14,10 @@ class Wheels < Formula
     sha256 "3c74ca291b8df26cc4c1e77c8162755b604acc03f6e0fa172602826d35a18126"
   end
 
-  # Module tarball not yet available as release asset — placeholder until first
-  # wheels release includes it. The auto-update workflow will fill in the real
-  # SHA once the asset exists.
-  #
-  # resource "wheels_module" do
-  #   url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-module-#{MODULE_VERSION}.tar.gz"
-  #   sha256 "PLACEHOLDER_MODULE_SHA"
-  # end
+  resource "wheels_module" do
+    url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-module-#{MODULE_VERSION}.tar.gz"
+    sha256 "a19356621b3f361b6cf2b6da1bd3f8ca6d1774d87d3d35fd0c1d4a7a4f78b533"
+  end
 
   depends_on "openjdk@21"
 
@@ -30,13 +26,12 @@ class Wheels < Formula
     libexec.install binary => "wheels"
     chmod 0755, libexec/"wheels"
 
-    # Module resource will be staged here once available:
-    # resource("wheels_module").stage do
-    #   (share/"wheels/module").install Dir["*"]
-    # end
-    #
-    # (share/"wheels").mkpath
-    # (share/"wheels/.module-version").write MODULE_VERSION
+    resource("wheels_module").stage do
+      (share/"wheels/module").install Dir["*"]
+    end
+
+    (share/"wheels").mkpath
+    (share/"wheels/.module-version").write MODULE_VERSION
 
     (bin/"wheels").write <<~EOS
       #!/bin/bash
@@ -75,5 +70,6 @@ class Wheels < Formula
   test do
     assert_predicate bin/"wheels", :executable?
     assert_predicate libexec/"wheels", :executable?
+    assert_predicate share/"wheels/module/Module.cfc", :exist?
   end
 end
