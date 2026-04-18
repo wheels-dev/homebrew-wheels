@@ -3,15 +3,15 @@ class Wheels < Formula
   homepage "https://wheels.dev"
   license "Apache-2.0"
 
-  LUCLI_VERSION = "0.3.3"
-  MODULE_VERSION = "4.0.0-SNAPSHOT+1442"
+  LUCLI_VERSION = "0.3.7"
+  MODULE_VERSION = ""
 
   if OS.mac?
     url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
-    sha256 "6abf3fa8637ad66ef11592a91649a91b27c620cbaa7aaeb434725e1c15c6b676"
+    sha256 "c9a122bbf5a0a8eeac9201e30f7928ddabd9c3c21da64dcfb75a6f790a8d0c36"
   elsif OS.linux?
     url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-linux"
-    sha256 "3c74ca291b8df26cc4c1e77c8162755b604acc03f6e0fa172602826d35a18126"
+    sha256 "7a07b4d3f47eaea65022beb68cf7d0caf3060289815ded047d5d3b4d29e81441"
   end
 
   resource "wheels_module" do
