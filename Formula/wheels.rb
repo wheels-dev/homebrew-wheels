@@ -33,6 +33,12 @@ class Wheels < Formula
     (share/"wheels").mkpath
     (share/"wheels/.module-version").write MODULE_VERSION
 
+    java_home = if OS.mac?
+      "#{Formula["openjdk@21"].opt_libexec}/openjdk.jdk/Contents/Home"
+    else
+      Formula["openjdk@21"].opt_libexec.to_s
+    end
+
     (bin/"wheels").write <<~EOS
       #!/bin/bash
       BREW_PREFIX="#{HOMEBREW_PREFIX}/opt/wheels"
@@ -52,7 +58,8 @@ class Wheels < Formula
         fi
       fi
 
-      export JAVA_HOME="#{Formula["openjdk@21"].opt_libexec}/openjdk.jdk/Contents/Home"
+      export JAVA_HOME="#{java_home}"
+      export LUCLI_HOME="$HOME/.wheels"
       exec "$BREW_PREFIX/libexec/wheels" "$@"
     EOS
     chmod 0755, bin/"wheels"
@@ -64,6 +71,10 @@ class Wheels < Formula
 
       On first run, the Wheels module will be initialized in:
         ~/.wheels/modules/wheels/
+
+      The wrapper sets LUCLI_HOME=~/.wheels so all runtime state
+      (modules, servers, deps, secrets) lives under that directory
+      and stays isolated from any standalone LuCLI install.
     EOS
   end
 
@@ -71,5 +82,6 @@ class Wheels < Formula
     assert_predicate bin/"wheels", :executable?
     assert_predicate libexec/"wheels", :executable?
     assert_predicate share/"wheels/module/Module.cfc", :exist?
+    assert_match(/\d+\.\d+\.\d+/, shell_output("#{bin}/wheels --version"))
   end
 end
