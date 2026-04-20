@@ -20,29 +20,45 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Current versions from formula
+          set -euo pipefail
+
+          # Reject empty / literal "null" / whitespace-only version strings.
+          # Any of those downstream produces a broken formula (see PR #3, cf9b215).
+          validate_version() {
+            local name="$1"
+            local val="$2"
+            if [ -z "${val// }" ] || [ "$val" = "null" ]; then
+              echo "::error::$name resolved to an invalid value ('$val'). Aborting to avoid writing a broken formula." >&2
+              exit 1
+            fi
+          }
+
           CURRENT_LUCLI=$(grep "LUCLI_VERSION" Formula/wheels.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
           CURRENT_MODULE=$(grep "MODULE_VERSION" Formula/wheels.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          validate_version "CURRENT_LUCLI" "$CURRENT_LUCLI"
+          validate_version "CURRENT_MODULE" "$CURRENT_MODULE"
           echo "current_lucli=$CURRENT_LUCLI" >> "$GITHUB_OUTPUT"
           echo "current_module=$CURRENT_MODULE" >> "$GITHUB_OUTPUT"
 
-          # Latest LuCLI release
           LATEST_LUCLI=$(gh release view --repo cybersonic/LuCLI --json tagName -q '.tagName' | sed 's/^v//')
+          validate_version "LATEST_LUCLI" "$LATEST_LUCLI"
           echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 
-          # Latest Wheels release with module tarball
-          LATEST_MODULE=$(gh release list --repo wheels-dev/wheels --limit 20 --json tagName,assets -q '
-            [.[] | select(.assets[].name | test("wheels-module.*\\.tar\\.gz"))] | .[0].tagName
+          # Latest Wheels release carrying the module tarball.
+          # --limit 100 because develop cuts a snapshot on every push; the tarball
+          # only ships on tagged releases, so a short window can miss it entirely.
+          LATEST_MODULE=$(gh release list --repo wheels-dev/wheels --limit 100 --json tagName,assets -q '
+            [.[] | select(.assets[].name | test("wheels-module.*\\.tar\\.gz"))] | .[0].tagName // ""
           ' | sed 's/^v//')
+          validate_version "LATEST_MODULE" "$LATEST_MODULE"
           echo "latest_module=$LATEST_MODULE" >> "$GITHUB_OUTPUT"
 
-          # Determine if update needed
           NEEDS_UPDATE="false"
-          if [ "$CURRENT_LUCLI" != "$LATEST_LUCLI" ] && [ -n "$LATEST_LUCLI" ]; then
+          if [ "$CURRENT_LUCLI" != "$LATEST_LUCLI" ]; then
             NEEDS_UPDATE="true"
             echo "LuCLI update: $CURRENT_LUCLI -> $LATEST_LUCLI"
           fi
-          if [ "$CURRENT_MODULE" != "$LATEST_MODULE" ] && [ -n "$LATEST_MODULE" ]; then
+          if [ "$CURRENT_MODULE" != "$LATEST_MODULE" ]; then
             NEEDS_UPDATE="true"
             echo "Module update: $CURRENT_MODULE -> $LATEST_MODULE"
           fi
@@ -53,25 +69,35 @@ jobs:
         id: hashes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          MODULE_VER: ${{ steps.check.outputs.latest_module }}
         run: |
-          LUCLI_VER="${{ steps.check.outputs.latest_lucli }}"
-          MODULE_VER="${{ steps.check.outputs.latest_module }}"
+          set -euo pipefail
 
-          # LuCLI binaries
+          require_sha() {
+            local name="$1"
+            local val="$2"
+            if [ -z "$val" ] || [ "${#val}" -ne 64 ]; then
+              echo "::error::$name did not compute a valid sha256 ('$val')." >&2
+              exit 1
+            fi
+          }
+
           curl -sfL "https://github.com/cybersonic/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" -o /tmp/lucli-macos
           MACOS_SHA=$(shasum -a 256 /tmp/lucli-macos | awk '{print $1}')
+          require_sha "MACOS_SHA" "$MACOS_SHA"
           echo "macos_sha=$MACOS_SHA" >> "$GITHUB_OUTPUT"
 
           curl -sfL "https://github.com/cybersonic/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" -o /tmp/lucli-linux
           LINUX_SHA=$(shasum -a 256 /tmp/lucli-linux | awk '{print $1}')
+          require_sha "LINUX_SHA" "$LINUX_SHA"
           echo "linux_sha=$LINUX_SHA" >> "$GITHUB_OUTPUT"
 
-          # Module tarball (may not exist yet)
-          MODULE_SHA=""
-          if [ -n "$MODULE_VER" ]; then
-            curl -sfL "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-module-${MODULE_VER}.tar.gz" -o /tmp/wheels-module.tar.gz && \
-              MODULE_SHA=$(shasum -a 256 /tmp/wheels-module.tar.gz | awk '{print $1}') || true
-          fi
+          # Module tarball is required now that MODULE_VERSION validation is strict —
+          # fail the workflow if the advertised release doesn't actually have the asset.
+          curl -sfL "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-module-${MODULE_VER}.tar.gz" -o /tmp/wheels-module.tar.gz
+          MODULE_SHA=$(shasum -a 256 /tmp/wheels-module.tar.gz | awk '{print $1}')
+          require_sha "MODULE_SHA" "$MODULE_SHA"
           echo "module_sha=$MODULE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Update formula
@@ -83,11 +109,21 @@ jobs:
           LINUX_SHA: ${{ steps.hashes.outputs.linux_sha }}
           MODULE_SHA: ${{ steps.hashes.outputs.module_sha }}
         run: |
-          # Update version constants
+          set -euo pipefail
+
+          # Belt-and-suspenders: reject empty inputs here too, in case upstream steps
+          # are edited in the future and the earlier guards get weakened.
+          for var in LUCLI_VER MODULE_VER MACOS_SHA LINUX_SHA MODULE_SHA; do
+            val="${!var}"
+            if [ -z "${val// }" ] || [ "$val" = "null" ]; then
+              echo "::error::$var is empty or null; refusing to write formula." >&2
+              exit 1
+            fi
+          done
+
           sed -i '' "s/LUCLI_VERSION = \".*\"/LUCLI_VERSION = \"${LUCLI_VER}\"/" Formula/wheels.rb
           sed -i '' "s/MODULE_VERSION = \".*\"/MODULE_VERSION = \"${MODULE_VER}\"/" Formula/wheels.rb
 
-          # Update SHA256 hashes using python for reliability
           python3 << 'PYEOF'
           import re, os
           macos_sha = os.environ["MACOS_SHA"]
@@ -97,20 +133,17 @@ jobs:
           with open("Formula/wheels.rb", "r") as f:
               content = f.read()
 
-          # Replace SHA256 hashes in order: macOS, Linux, module
           shas = list(re.finditer(r'sha256 "[a-fA-F0-9]+"', content))
           if len(shas) >= 2:
               content = content[:shas[1].start()] + f'sha256 "{linux_sha}"' + content[shas[1].end():]
               content = content[:shas[0].start()] + f'sha256 "{macos_sha}"' + content[shas[0].end():]
 
-          # If module SHA available and resource block exists (commented or not), update it
           if module_sha:
               content = re.sub(
                   r'#\s*sha256 "PLACEHOLDER_MODULE_SHA"',
                   f'sha256 "{module_sha}"',
                   content
               )
-              # Uncomment the resource block if it was commented
               content = re.sub(r'^\s*#\s*(resource "wheels_module")', r'  \1', content, flags=re.MULTILINE)
               content = re.sub(r'^\s*#\s*(url "https://github.com/wheels-dev/wheels)', r'    \1', content, flags=re.MULTILINE)
               content = re.sub(r'^\s*#\s*(sha256 "[a-fA-F0-9]+")', r'    \1', content, flags=re.MULTILINE)
@@ -120,14 +153,66 @@ jobs:
               f.write(content)
           PYEOF
 
+      - name: Verify formula integrity
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          set -euo pipefail
+
+          # Post-write verification: re-read the formula and confirm no constant is empty.
+          # This catches regressions in the sed/python rewrite logic.
+          WROTE_LUCLI=$(grep "LUCLI_VERSION" Formula/wheels.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          WROTE_MODULE=$(grep "MODULE_VERSION" Formula/wheels.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
+
+          if [ -z "${WROTE_LUCLI// }" ] || [ "$WROTE_LUCLI" = "null" ]; then
+            echo "::error::Formula/wheels.rb has empty or invalid LUCLI_VERSION after rewrite: '$WROTE_LUCLI'" >&2
+            exit 1
+          fi
+          if [ -z "${WROTE_MODULE// }" ] || [ "$WROTE_MODULE" = "null" ]; then
+            echo "::error::Formula/wheels.rb has empty or invalid MODULE_VERSION after rewrite: '$WROTE_MODULE'" >&2
+            exit 1
+          fi
+
+          # Reject any URL that would resolve to a 404 because of empty interpolation.
+          # Example failure: "v/wheels-module-.tar.gz" (what broke in cf9b215).
+          if grep -E 'releases/download/v/|/wheels-module-\.tar\.gz|/lucli--(macos|linux)' Formula/wheels.rb; then
+            echo "::error::Formula contains a malformed URL suggestive of empty version interpolation." >&2
+            exit 1
+          fi
+
+          echo "Formula verified: LUCLI_VERSION=$WROTE_LUCLI, MODULE_VERSION=$WROTE_MODULE"
+
+      - name: Smoke test formula (brew audit + fetch)
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          set -euo pipefail
+
+          # Tap locally so `brew audit` / `brew fetch` can resolve the formula.
+          TAP_DIR="$(brew --repository)/Library/Taps/wheels-dev/homebrew-wheels"
+          mkdir -p "$(dirname "$TAP_DIR")"
+          ln -sfn "$GITHUB_WORKSPACE" "$TAP_DIR"
+
+          # Strict audit catches syntax errors, malformed URLs, missing SHAs, etc.
+          brew audit --strict wheels-dev/wheels/wheels
+
+          # `brew fetch` resolves and downloads the main URL + all resources
+          # without running the install. This catches 404s on the module tarball
+          # URL — exactly the failure mode of cf9b215 — before we ever open a PR.
+          brew fetch --retry wheels-dev/wheels/wheels
+
       - name: Create PR
         if: steps.check.outputs.needs_update == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          MODULE_VER: ${{ steps.check.outputs.latest_module }}
+          CURRENT_LUCLI: ${{ steps.check.outputs.current_lucli }}
+          CURRENT_MODULE: ${{ steps.check.outputs.current_module }}
         run: |
-          LUCLI_VER="${{ steps.check.outputs.latest_lucli }}"
-          MODULE_VER="${{ steps.check.outputs.latest_module }}"
-          BRANCH="auto-update/lucli-${LUCLI_VER}-module-${MODULE_VER}"
+          set -euo pipefail
+
+          # Sanitize version strings for branch names (+ is legal but noisy in refs).
+          sanitize() { echo "$1" | tr '+' '-'; }
+          BRANCH="auto-update/lucli-$(sanitize "$LUCLI_VER")-module-$(sanitize "$MODULE_VER")"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -140,18 +225,23 @@ jobs:
             --title "chore: update to LuCLI ${LUCLI_VER}, module ${MODULE_VER}" \
             --body "Auto-update from upstream releases.
 
-          - LuCLI: ${{ steps.check.outputs.current_lucli }} -> ${LUCLI_VER}
-          - Module: ${{ steps.check.outputs.current_module }} -> ${MODULE_VER}" \
+          - LuCLI: ${CURRENT_LUCLI} -> ${LUCLI_VER}
+          - Module: ${CURRENT_MODULE} -> ${MODULE_VER}" \
             --label "auto-update"
 
       - name: Enable auto-merge
         if: steps.check.outputs.needs_update == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          MODULE_VER: ${{ steps.check.outputs.latest_module }}
         run: |
-          LUCLI_VER="${{ steps.check.outputs.latest_lucli }}"
-          MODULE_VER="${{ steps.check.outputs.latest_module }}"
-          PR_URL=$(gh pr list --head "auto-update/lucli-${LUCLI_VER}-module-${MODULE_VER}" --json url -q '.[0].url')
+          set -euo pipefail
+
+          sanitize() { echo "$1" | tr '+' '-'; }
+          BRANCH="auto-update/lucli-$(sanitize "$LUCLI_VER")-module-$(sanitize "$MODULE_VER")"
+
+          PR_URL=$(gh pr list --head "$BRANCH" --json url -q '.[0].url // ""')
           if [ -n "$PR_URL" ]; then
             gh pr merge "$PR_URL" --auto --squash
           fi
