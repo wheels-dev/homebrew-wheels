@@ -5,6 +5,7 @@ class Wheels < Formula
 
   LUCLI_VERSION = "0.3.7"
   MODULE_VERSION = "4.0.0-SNAPSHOT+1596"
+  SQLITE_JDBC_VERSION = "3.49.1.0"
 
   if OS.mac?
     url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
@@ -22,6 +23,16 @@ class Wheels < Formula
   resource "wheels_core" do
     url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-core-#{MODULE_VERSION}.zip"
     sha256 "b4e773dfaebe8716a3c16e9ecc4d3f13ac5f72eecc249dbf374c00e5f7f55e4b"
+  end
+
+  # SQLite JDBC driver for the zero-config datasource emitted by `wheels new`.
+  # Lucee 7's BundleProvider crashes when resolving sqlite-jdbc via the
+  # bundleName hint, so wheels >=4.0 generates app.cfm without the hint and
+  # relies on the JAR being on the classpath. The wrapper drops this JAR into
+  # ~/.wheels/express/<lucee>/lib/ext/ on first run after LuCLI extracts.
+  resource "sqlite_jdbc" do
+    url "https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/#{SQLITE_JDBC_VERSION}/sqlite-jdbc-#{SQLITE_JDBC_VERSION}.jar"
+    sha256 "5c8609d2ca341deb8c6f71778974b5ba4995c7d32d7c7c89d9392a3e72c39291"
   end
 
   depends_on "openjdk@21"
@@ -44,6 +55,10 @@ class Wheels < Formula
       (share/"wheels/framework/wheels").install Dir["*"]
     end
 
+    resource("sqlite_jdbc").stage do
+      (share/"wheels/lib").install Dir["*.jar"]
+    end
+
     (share/"wheels").mkpath
     (share/"wheels/.module-version").write MODULE_VERSION
 
@@ -62,6 +77,7 @@ class Wheels < Formula
       WHEELS_FRAMEWORK_DST="$HOME/.wheels/modules/wheels/vendor/wheels"
       WHEELS_VERSION_SRC="$BREW_PREFIX/share/wheels/.module-version"
       WHEELS_VERSION_DST="$HOME/.wheels/modules/wheels/.module-version"
+      SQLITE_JDBC_SRC="$BREW_PREFIX/share/wheels/lib/sqlite-jdbc-#{SQLITE_JDBC_VERSION}.jar"
 
       if [ -f "$WHEELS_VERSION_SRC" ]; then
         src_ver=$(cat "$WHEELS_VERSION_SRC")
@@ -76,6 +92,17 @@ class Wheels < Formula
           fi
           cp "$WHEELS_VERSION_SRC" "$WHEELS_VERSION_DST"
         fi
+      fi
+
+      # Drop sqlite-jdbc into LuCLI's extracted Lucee lib/ext/ if missing. The
+      # express dir only exists after first LuCLI run, so this is a no-op on
+      # the very first invocation and self-heals on every run after.
+      if [ -f "$SQLITE_JDBC_SRC" ]; then
+        for ext_dir in "$HOME/.wheels/express"/*/lib/ext; do
+          [ -d "$ext_dir" ] || continue
+          [ -f "$ext_dir/sqlite-jdbc-#{SQLITE_JDBC_VERSION}.jar" ] && continue
+          cp "$SQLITE_JDBC_SRC" "$ext_dir/" 2>/dev/null || true
+        done
       fi
 
       export JAVA_HOME="#{java_home}"
@@ -105,6 +132,7 @@ class Wheels < Formula
     assert_predicate libexec/"wheels", :executable?
     assert_predicate share/"wheels/module/Module.cfc", :exist?
     assert_predicate share/"wheels/framework/wheels", :exist?
+    assert_predicate share/"wheels/lib/sqlite-jdbc-#{SQLITE_JDBC_VERSION}.jar", :exist?
     assert_match(/\d+\.\d+\.\d+/, shell_output("#{bin}/wheels --version"))
   end
 end
