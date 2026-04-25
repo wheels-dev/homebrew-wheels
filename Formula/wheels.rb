@@ -4,7 +4,7 @@ class Wheels < Formula
   license "Apache-2.0"
 
   LUCLI_VERSION = "0.3.7"
-  MODULE_VERSION = "4.0.0-SNAPSHOT+1523"
+  MODULE_VERSION = "4.0.0-SNAPSHOT+1596"
 
   if OS.mac?
     url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
@@ -16,7 +16,12 @@ class Wheels < Formula
 
   resource "wheels_module" do
     url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-module-#{MODULE_VERSION}.tar.gz"
-    sha256 "4aa7dc5e7dafa5b6bd521807c8c81ca7f9174e4e4840927f921bc89f34c20313"
+    sha256 "9dfbb5c65af5af9074941fe6c21761e75c0dc80e3138732ef4406055e1c078de"
+  end
+
+  resource "wheels_core" do
+    url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-core-#{MODULE_VERSION}.zip"
+    sha256 "b4e773dfaebe8716a3c16e9ecc4d3f13ac5f72eecc249dbf374c00e5f7f55e4b"
   end
 
   depends_on "openjdk@21"
@@ -28,6 +33,15 @@ class Wheels < Formula
 
     resource("wheels_module").stage do
       (share/"wheels/module").install Dir["*"]
+    end
+
+    # Framework source (vendor/wheels/) is shipped as a companion zip whose
+    # only top-level entry is a "wheels/" directory. Brew's resource.stage
+    # auto-strips that wrapper before yielding, so re-introduce it explicitly
+    # by installing into share/wheels/framework/wheels/ — that's the path the
+    # wrapper syncs from.
+    resource("wheels_core").stage do
+      (share/"wheels/framework/wheels").install Dir["*"]
     end
 
     (share/"wheels").mkpath
@@ -44,6 +58,8 @@ class Wheels < Formula
       BREW_PREFIX="#{HOMEBREW_PREFIX}/opt/wheels"
       WHEELS_MODULE_SRC="$BREW_PREFIX/share/wheels/module"
       WHEELS_MODULE_DST="$HOME/.wheels/modules/wheels"
+      WHEELS_FRAMEWORK_SRC="$BREW_PREFIX/share/wheels/framework/wheels"
+      WHEELS_FRAMEWORK_DST="$HOME/.wheels/modules/wheels/vendor/wheels"
       WHEELS_VERSION_SRC="$BREW_PREFIX/share/wheels/.module-version"
       WHEELS_VERSION_DST="$HOME/.wheels/modules/wheels/.module-version"
 
@@ -54,6 +70,10 @@ class Wheels < Formula
         if [ "$src_ver" != "$dst_ver" ]; then
           mkdir -p "$WHEELS_MODULE_DST"
           cp -R "$WHEELS_MODULE_SRC/"* "$WHEELS_MODULE_DST/"
+          if [ -d "$WHEELS_FRAMEWORK_SRC" ]; then
+            mkdir -p "$WHEELS_FRAMEWORK_DST"
+            cp -R "$WHEELS_FRAMEWORK_SRC/"* "$WHEELS_FRAMEWORK_DST/"
+          fi
           cp "$WHEELS_VERSION_SRC" "$WHEELS_VERSION_DST"
         fi
       fi
@@ -69,8 +89,10 @@ class Wheels < Formula
     <<~EOS
       Java 21 is required and has been installed as a dependency.
 
-      On first run, the Wheels module will be initialized in:
+      On first run, the Wheels module and framework source will be
+      initialized in:
         ~/.wheels/modules/wheels/
+        ~/.wheels/modules/wheels/vendor/wheels/
 
       The wrapper sets LUCLI_HOME=~/.wheels so all runtime state
       (modules, servers, deps, secrets) lives under that directory
@@ -82,6 +104,7 @@ class Wheels < Formula
     assert_predicate bin/"wheels", :executable?
     assert_predicate libexec/"wheels", :executable?
     assert_predicate share/"wheels/module/Module.cfc", :exist?
+    assert_predicate share/"wheels/framework/wheels", :exist?
     assert_match(/\d+\.\d+\.\d+/, shell_output("#{bin}/wheels --version"))
   end
 end

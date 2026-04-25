@@ -102,6 +102,14 @@ jobs:
           require_sha "MODULE_SHA" "$MODULE_SHA"
           echo "module_sha=$MODULE_SHA" >> "$GITHUB_OUTPUT"
 
+          # Framework-source zip — required so `wheels new` can boot the scaffold.
+          # See wheels-dev/wheels PR 2294 for the release-workflow fix that
+          # started publishing this artifact on snapshots.
+          curl -sfL "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-core-${MODULE_VER}.zip" -o /tmp/wheels-core.zip
+          CORE_SHA=$(shasum -a 256 /tmp/wheels-core.zip | awk '{print $1}')
+          require_sha "CORE_SHA" "$CORE_SHA"
+          echo "core_sha=$CORE_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Update formula
         if: steps.check.outputs.needs_update == 'true'
         env:
@@ -110,12 +118,13 @@ jobs:
           MACOS_SHA: ${{ steps.hashes.outputs.macos_sha }}
           LINUX_SHA: ${{ steps.hashes.outputs.linux_sha }}
           MODULE_SHA: ${{ steps.hashes.outputs.module_sha }}
+          CORE_SHA: ${{ steps.hashes.outputs.core_sha }}
         run: |
           set -euo pipefail
 
           # Belt-and-suspenders: reject empty inputs here too, in case upstream steps
           # are edited in the future and the earlier guards get weakened.
-          for var in LUCLI_VER MODULE_VER MACOS_SHA LINUX_SHA MODULE_SHA; do
+          for var in LUCLI_VER MODULE_VER MACOS_SHA LINUX_SHA MODULE_SHA CORE_SHA; do
             val="${!var}"
             if [ -z "${val// }" ] || [ "$val" = "null" ]; then
               echo "::error::$var is empty or null; refusing to write formula." >&2
@@ -131,25 +140,28 @@ jobs:
           macos_sha = os.environ["MACOS_SHA"]
           linux_sha = os.environ["LINUX_SHA"]
           module_sha = os.environ["MODULE_SHA"]
+          core_sha = os.environ["CORE_SHA"]
 
           with open("Formula/wheels.rb", "r") as f:
               content = f.read()
 
-          shas = list(re.finditer(r'sha256 "[a-fA-F0-9]+"', content))
-          if len(shas) >= 2:
-              content = content[:shas[1].start()] + f'sha256 "{linux_sha}"' + content[shas[1].end():]
-              content = content[:shas[0].start()] + f'sha256 "{macos_sha}"' + content[shas[0].end():]
-
-          if module_sha:
-              content = re.sub(
-                  r'#\s*sha256 "PLACEHOLDER_MODULE_SHA"',
-                  f'sha256 "{module_sha}"',
-                  content
-              )
-              content = re.sub(r'^\s*#\s*(resource "wheels_module")', r'  \1', content, flags=re.MULTILINE)
-              content = re.sub(r'^\s*#\s*(url "https://github.com/wheels-dev/wheels)', r'    \1', content, flags=re.MULTILINE)
-              content = re.sub(r'^\s*#\s*(sha256 "[a-fA-F0-9]+")', r'    \1', content, flags=re.MULTILINE)
-              content = re.sub(r'^\s*#\s*(end)\s*$', r'  \1', content, flags=re.MULTILINE)
+          # Update each sha256 by anchoring on context unique to its target,
+          # rather than by position in the file. This is robust to formula
+          # reordering and avoids the silent bug where only the LuCLI shas
+          # were rotating while the module/core shas drifted out of sync.
+          # The wheels_core block uses [^"]+ instead of [a-fA-F0-9]+ so the
+          # initial PLACEHOLDER_CORE_SHA sentinel also matches on first run.
+          replacements = [
+              (r'(-macos"\s*\n\s*sha256 ")[a-fA-F0-9]+(")', macos_sha),
+              (r'(-linux"\s*\n\s*sha256 ")[a-fA-F0-9]+(")', linux_sha),
+              (r'(resource "wheels_module" do\s*\n\s*url "[^"]+"\s*\n\s*sha256 ")[a-fA-F0-9]+(")', module_sha),
+              (r'(resource "wheels_core" do\s*\n\s*url "[^"]+"\s*\n\s*sha256 ")[^"]+(")', core_sha),
+          ]
+          for pattern, new_sha in replacements:
+              new_content, n = re.subn(pattern, lambda m, s=new_sha: m.group(1) + s + m.group(2), content)
+              if n != 1:
+                  raise SystemExit(f"::error::Expected exactly 1 match for sha256 pattern, got {n}: {pattern}")
+              content = new_content
 
           with open("Formula/wheels.rb", "w") as f:
               f.write(content)
