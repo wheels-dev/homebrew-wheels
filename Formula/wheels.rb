@@ -35,12 +35,13 @@ class Wheels < Formula
       (share/"wheels/module").install Dir["*"]
     end
 
-    # Framework source (vendor/wheels/) is shipped as a companion zip. Extracting
-    # it into share/wheels/framework/wheels/ matches the wheels-core zip's own
-    # internal layout (top-level "wheels/" directory, verified against the
-    # release workflow's smoke-test at tools/ci/smoke-test-module.sh).
+    # Framework source (vendor/wheels/) is shipped as a companion zip whose
+    # only top-level entry is a "wheels/" directory. Brew's resource.stage
+    # auto-strips that wrapper before yielding, so re-introduce it explicitly
+    # by installing into share/wheels/framework/wheels/ — that's the path the
+    # wrapper syncs from.
     resource("wheels_core").stage do
-      (share/"wheels/framework").install Dir["*"]
+      (share/"wheels/framework/wheels").install Dir["*"]
     end
 
     (share/"wheels").mkpath
