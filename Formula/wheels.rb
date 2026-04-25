@@ -4,7 +4,7 @@ class Wheels < Formula
   license "Apache-2.0"
 
   LUCLI_VERSION = "0.3.7"
-  MODULE_VERSION = "4.0.0-SNAPSHOT+1523"
+  MODULE_VERSION = "4.0.0-SNAPSHOT+1596"
 
   if OS.mac?
     url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
@@ -16,12 +16,12 @@ class Wheels < Formula
 
   resource "wheels_module" do
     url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-module-#{MODULE_VERSION}.tar.gz"
-    sha256 "4aa7dc5e7dafa5b6bd521807c8c81ca7f9174e4e4840927f921bc89f34c20313"
+    sha256 "9dfbb5c65af5af9074941fe6c21761e75c0dc80e3138732ef4406055e1c078de"
   end
 
   resource "wheels_core" do
     url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-core-#{MODULE_VERSION}.zip"
-    sha256 "PLACEHOLDER_CORE_SHA"
+    sha256 "b4e773dfaebe8716a3c16e9ecc4d3f13ac5f72eecc249dbf374c00e5f7f55e4b"
   end
 
   depends_on "openjdk@21"

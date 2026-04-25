@@ -143,31 +143,23 @@ jobs:
           with open("Formula/wheels.rb", "r") as f:
               content = f.read()
 
-          shas = list(re.finditer(r'sha256 "[a-fA-F0-9]+"', content))
-          if len(shas) >= 2:
-              content = content[:shas[1].start()] + f'sha256 "{linux_sha}"' + content[shas[1].end():]
-              content = content[:shas[0].start()] + f'sha256 "{macos_sha}"' + content[shas[0].end():]
-
-          # Keep the wheels_core sha256 in sync. The resource block is always
-          # present in the formula; only the sha256 value rotates per release.
-          # Match [^"]+ to also catch the "PLACEHOLDER_CORE_SHA" sentinel on
-          # the first auto-update run after this PR lands.
-          core_block_re = re.compile(
-              r'(resource "wheels_core" do\s*\n\s*url "[^"]+"\s*\n\s*sha256 ")[^"]+(")',
-              re.MULTILINE,
-          )
-          content = core_block_re.sub(r'\g<1>' + core_sha + r'\g<2>', content)
-
-          if module_sha:
-              content = re.sub(
-                  r'#\s*sha256 "PLACEHOLDER_MODULE_SHA"',
-                  f'sha256 "{module_sha}"',
-                  content
-              )
-              content = re.sub(r'^\s*#\s*(resource "wheels_module")', r'  \1', content, flags=re.MULTILINE)
-              content = re.sub(r'^\s*#\s*(url "https://github.com/wheels-dev/wheels)', r'    \1', content, flags=re.MULTILINE)
-              content = re.sub(r'^\s*#\s*(sha256 "[a-fA-F0-9]+")', r'    \1', content, flags=re.MULTILINE)
-              content = re.sub(r'^\s*#\s*(end)\s*$', r'  \1', content, flags=re.MULTILINE)
+          # Update each sha256 by anchoring on context unique to its target,
+          # rather than by position in the file. This is robust to formula
+          # reordering and avoids the silent bug where only the LuCLI shas
+          # were rotating while the module/core shas drifted out of sync.
+          # The wheels_core block uses [^"]+ instead of [a-fA-F0-9]+ so the
+          # initial PLACEHOLDER_CORE_SHA sentinel also matches on first run.
+          replacements = [
+              (r'(-macos"\s*\n\s*sha256 ")[a-fA-F0-9]+(")', macos_sha),
+              (r'(-linux"\s*\n\s*sha256 ")[a-fA-F0-9]+(")', linux_sha),
+              (r'(resource "wheels_module" do\s*\n\s*url "[^"]+"\s*\n\s*sha256 ")[a-fA-F0-9]+(")', module_sha),
+              (r'(resource "wheels_core" do\s*\n\s*url "[^"]+"\s*\n\s*sha256 ")[^"]+(")', core_sha),
+          ]
+          for pattern, new_sha in replacements:
+              new_content, n = re.subn(pattern, lambda m, s=new_sha: m.group(1) + s + m.group(2), content)
+              if n != 1:
+                  raise SystemExit(f"::error::Expected exactly 1 match for sha256 pattern, got {n}: {pattern}")
+              content = new_content
 
           with open("Formula/wheels.rb", "w") as f:
               f.write(content)
