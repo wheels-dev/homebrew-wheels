@@ -45,10 +45,12 @@ jobs:
           echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 
           # Latest Wheels release carrying the module tarball.
-          # --limit 100 because develop cuts a snapshot on every push; the tarball
+          # per_page=100 because develop cuts a snapshot on every push; the tarball
           # only ships on tagged releases, so a short window can miss it entirely.
-          LATEST_MODULE=$(gh release list --repo wheels-dev/wheels --limit 100 --json tagName,assets -q '
-            [.[] | select(.assets[].name | test("wheels-module.*\\.tar\\.gz"))] | .[0].tagName // ""
+          # Uses the REST API directly because `gh release list --json` no longer
+          # exposes the `assets` field (removed in gh CLI ~v2.81).
+          LATEST_MODULE=$(gh api "repos/wheels-dev/wheels/releases?per_page=100" -q '
+            [.[] | select(.draft == false) | select(any(.assets[]; .name | test("wheels-module.*\\.tar\\.gz")))] | .[0].tag_name // ""
           ' | sed 's/^v//')
           validate_version "LATEST_MODULE" "$LATEST_MODULE"
           echo "latest_module=$LATEST_MODULE" >> "$GITHUB_OUTPUT"
