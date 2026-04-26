@@ -5,6 +5,7 @@ class Wheels < Formula
 
   LUCLI_VERSION = "0.3.7"
   MODULE_VERSION = "4.0.0-SNAPSHOT+1523"
+  SQLITE_JDBC_VERSION = "3.49.1.0"
 
   if OS.mac?
     url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
@@ -22,6 +23,18 @@ class Wheels < Formula
   resource "wheels_core" do
     url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-core-#{MODULE_VERSION}.zip"
     sha256 "PLACEHOLDER_CORE_SHA"
+  end
+
+  # SQLite JDBC driver — shipped with the bottle so fresh installs can run the
+  # default zero-config SQLite datasource on first `wheels start`. Without this,
+  # Lucee 7's BundleProvider tries to fetch the OSGi bundle from update.lucee.org
+  # at runtime and fails (the bundle is not on that update provider, and the
+  # fallback S3 listing currently contains malformed entries that crash the
+  # version parser). The wrapper copies this JAR into Lucee Express's lib/ext
+  # on first invocation so the driver is on the classpath when migrations run.
+  resource "sqlite_jdbc" do
+    url "https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/#{SQLITE_JDBC_VERSION}/sqlite-jdbc-#{SQLITE_JDBC_VERSION}.jar"
+    sha256 "5c8609d2ca341deb8c6f71778974b5ba4995c7d32d7c7c89d9392a3e72c39291"
   end
 
   depends_on "openjdk@21"
@@ -43,6 +56,10 @@ class Wheels < Formula
       (share/"wheels/framework").install Dir["*"]
     end
 
+    resource("sqlite_jdbc").stage do
+      (share/"wheels/jdbc").install "sqlite-jdbc-#{SQLITE_JDBC_VERSION}.jar"
+    end
+
     (share/"wheels").mkpath
     (share/"wheels/.module-version").write MODULE_VERSION
 
@@ -61,6 +78,7 @@ class Wheels < Formula
       WHEELS_FRAMEWORK_DST="$HOME/.wheels/modules/wheels/vendor/wheels"
       WHEELS_VERSION_SRC="$BREW_PREFIX/share/wheels/.module-version"
       WHEELS_VERSION_DST="$HOME/.wheels/modules/wheels/.module-version"
+      WHEELS_JDBC_SRC="$BREW_PREFIX/share/wheels/jdbc"
 
       if [ -f "$WHEELS_VERSION_SRC" ]; then
         src_ver=$(cat "$WHEELS_VERSION_SRC")
@@ -75,6 +93,22 @@ class Wheels < Formula
           fi
           cp "$WHEELS_VERSION_SRC" "$WHEELS_VERSION_DST"
         fi
+      fi
+
+      # Seed the SQLite JDBC driver into every Lucee Express install under
+      # ~/.wheels/express/. Lucee 7's BundleProvider can't fetch this bundle
+      # from update.lucee.org (the bundle isn't on that provider, and the
+      # fallback S3 listing parser currently chokes on malformed entries).
+      # Without it, the default zero-config SQLite datasource fails on first
+      # use — `wheels migrate latest` exits 0 but no schema is created.
+      # Idempotent: skipped per-express-version once the file is present.
+      if [ -d "$WHEELS_JDBC_SRC" ] && [ -d "$HOME/.wheels/express" ]; then
+        for express_dir in "$HOME/.wheels/express"/*/; do
+          ext_dir="${express_dir}lib/ext"
+          if [ -d "$ext_dir" ] && ! ls "$ext_dir"/sqlite-jdbc*.jar >/dev/null 2>&1; then
+            cp "$WHEELS_JDBC_SRC"/sqlite-jdbc-*.jar "$ext_dir/" 2>/dev/null || true
+          fi
+        done
       fi
 
       export JAVA_HOME="#{java_home}"
@@ -104,6 +138,7 @@ class Wheels < Formula
     assert_predicate libexec/"wheels", :executable?
     assert_predicate share/"wheels/module/Module.cfc", :exist?
     assert_predicate share/"wheels/framework/wheels", :exist?
+    assert_predicate share/"wheels/jdbc/sqlite-jdbc-#{SQLITE_JDBC_VERSION}.jar", :exist?
     assert_match(/\d+\.\d+\.\d+/, shell_output("#{bin}/wheels --version"))
   end
 end
