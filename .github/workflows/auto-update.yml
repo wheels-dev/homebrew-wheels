@@ -37,6 +37,8 @@ jobs:
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISPATCH_TYPE: ${{ github.event.action }}
+          DISPATCH_VERSION: ${{ github.event.client_payload.version }}
         run: |
           set -euo pipefail
 
@@ -62,14 +64,45 @@ jobs:
           validate_version "LATEST_LUCLI" "$LATEST_LUCLI"
           echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 
-          # Latest Wheels release carrying the module tarball.
-          # per_page=100 because develop cuts a snapshot on every push; the tarball
-          # only ships on tagged releases, so a short window can miss it entirely.
-          # Uses the REST API directly because `gh release list --json` no longer
-          # exposes the `assets` field (removed in gh CLI ~v2.81).
-          LATEST_MODULE=$(gh api "repos/wheels-dev/wheels/releases?per_page=100" -q '
-            [.[] | select(.draft == false) | select(any(.assets[]; .name | test("wheels-module.*\\.tar\\.gz")))] | .[0].tag_name // ""
-          ' | sed 's/^v//')
+          # Module version resolution.
+          #
+          # When triggered via repository_dispatch[wheels-released], trust the
+          # client_payload.version sent by wheels-dev/wheels' release.yml — it
+          # already knows exactly which version was just published. Querying
+          # the API in that window hits an eventual-consistency race where
+          # the release exists but the wheels-module-*.tar.gz asset hasn't
+          # finished uploading; the asset filter then returns empty and the
+          # strict guard above aborts. Auto-update was stuck for hours on
+          # April 27 for exactly this reason — every dispatched run failed
+          # validation while the cron picked up the previous tick fine.
+          #
+          # For schedule / workflow_dispatch / lucli-released triggers, fall
+          # back to the API query but wrap it in retry-with-backoff so a
+          # cron that happens to fire during the same upload window self-heals
+          # instead of needing the next tick. DISPATCH_TYPE / DISPATCH_VERSION
+          # come from env (see step env block) so they're safely quoted as
+          # bash variables, not interpolated into the script body.
+          LATEST_MODULE=""
+          if [ "${DISPATCH_TYPE:-}" = "wheels-released" ] \
+              && [ -n "${DISPATCH_VERSION:-}" ] \
+              && [ "${DISPATCH_VERSION:-}" != "null" ]; then
+            LATEST_MODULE="${DISPATCH_VERSION#v}"
+            echo "Using dispatch payload for module version: $LATEST_MODULE"
+          fi
+
+          if [ -z "${LATEST_MODULE:-}" ]; then
+            for attempt in 1 2 3 4 5; do
+              LATEST_MODULE=$(gh api "repos/wheels-dev/wheels/releases?per_page=100" -q '
+                [.[] | select(.draft == false) | select(any(.assets[]; .name | test("wheels-module.*\\.tar\\.gz")))] | .[0].tag_name // ""
+              ' | sed 's/^v//')
+              if [ -n "${LATEST_MODULE// }" ] && [ "$LATEST_MODULE" != "null" ]; then
+                break
+              fi
+              backoff=$((attempt * 15))
+              echo "Attempt ${attempt}/5: API returned no release with wheels-module-*.tar.gz asset; retrying in ${backoff}s..."
+              sleep "$backoff"
+            done
+          fi
           validate_version "LATEST_MODULE" "$LATEST_MODULE"
           echo "latest_module=$LATEST_MODULE" >> "$GITHUB_OUTPUT"
 
