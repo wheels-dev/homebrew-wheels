@@ -21,7 +21,17 @@ jobs:
   check-updates:
     runs-on: macos-latest
     steps:
+      # AUTO_MERGE_PAT (a fine-grained PAT scoped to this repo with
+      # Contents: write + Pull requests: write) is used for git push, gh pr create,
+      # and gh pr merge so the resulting push/pull_request events DO trigger
+      # downstream workflows (the audit job). With the default GITHUB_TOKEN, those
+      # events are suppressed by GitHub Actions' loop-prevention mechanism, leaving
+      # auto-update PRs stuck in BLOCKED state with no required check ever firing.
+      # Falls back to GITHUB_TOKEN if the PAT isn't set — auto-update still opens
+      # PRs, they just won't auto-merge until manually nudged.
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Check for updates
         id: check
@@ -224,7 +234,10 @@ jobs:
       - name: Create PR
         if: steps.check.outputs.needs_update == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use the PAT (when set) so the resulting `push origin <branch>` and
+          # the PR creation event DO trigger the on:pull_request audit workflow.
+          # See checkout step at top of job for full rationale.
+          GH_TOKEN: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
           CURRENT_LUCLI: ${{ steps.check.outputs.current_lucli }}
@@ -254,7 +267,7 @@ jobs:
       - name: Enable auto-merge
         if: steps.check.outputs.needs_update == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
         run: |
