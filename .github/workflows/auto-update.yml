@@ -4,6 +4,14 @@ on:
   schedule:
     - cron: '0 8 * * *'
   workflow_dispatch:
+  # Fired by wheels-dev/wheels release workflow on every published release
+  # (snapshot or final). Cuts the wait between an upstream release and a
+  # bumped formula from up-to-24h (cron) down to ~5min. The event types are
+  # static strings under our control — no untrusted input is interpolated.
+  repository_dispatch:
+    types:
+      - wheels-released
+      - lucli-released
 
 permissions:
   contents: write
