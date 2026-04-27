@@ -4,7 +4,7 @@ class Wheels < Formula
   license "Apache-2.0"
 
   LUCLI_VERSION = "0.3.7"
-  MODULE_VERSION = "4.0.0-SNAPSHOT+1611"
+  MODULE_VERSION = "4.0.0-SNAPSHOT+1624"
   SQLITE_JDBC_VERSION = "3.49.1.0"
 
   if OS.mac?
@@ -17,12 +17,12 @@ class Wheels < Formula
 
   resource "wheels_module" do
     url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-module-#{MODULE_VERSION}.tar.gz"
-    sha256 "1919943631c55296b2b1e2d16c2f08530c5a33649e7ad110b233bb3fbe9f7694"
+    sha256 "a2bc72a8318bf72facc0bd24990c072cb92b59134757c41f761a8bf004c1b3ec"
   end
 
   resource "wheels_core" do
     url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-core-#{MODULE_VERSION}.zip"
-    sha256 "10f6f77aaed4129b43658f0e906df06c1e5799ae41b0b0f71ffd1eca3bc50adf"
+    sha256 "2fe3852a093068577ac7b6b78f2c33d3f0cc78a17c1cb0545a5d84d3cb9bd47e"
   end
 
   # SQLite JDBC driver for the zero-config datasource emitted by `wheels new`.
