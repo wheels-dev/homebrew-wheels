@@ -1,11 +1,17 @@
 class Wheels < Formula
   desc "CLI for the Wheels MVC framework — powered by LuCLI"
   homepage "https://wheels.dev"
-  license "Apache-2.0"
 
   LUCLI_VERSION = "0.3.7"
   MODULE_VERSION = "4.0.0-SNAPSHOT+1624"
   SQLITE_JDBC_VERSION = "3.49.1.0"
+
+  # Track the framework version, not the LuCLI wrapper version. The wheels
+  # module ships independently of LuCLI and bumps far more often, so brew's
+  # upgrade check must compare MODULE_VERSION — otherwise `brew upgrade` is
+  # a silent no-op for module-only bumps (the common case).
+  version MODULE_VERSION
+  license "Apache-2.0"
 
   if OS.mac?
     url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
