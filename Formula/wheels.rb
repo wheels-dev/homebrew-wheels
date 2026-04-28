@@ -85,6 +85,85 @@ class Wheels < Formula
       WHEELS_VERSION_DST="$HOME/.wheels/modules/wheels/.module-version"
       SQLITE_JDBC_SRC="$BREW_PREFIX/share/wheels/lib/sqlite-jdbc-#{SQLITE_JDBC_VERSION}.jar"
 
+      # Intercept --version and --help before LuCLI sees them. picocli treats
+      # these as `usageHelp`/`versionHelp` flags and short-circuits during arg
+      # parsing — they would never reach our module's version()/showHelp() if
+      # we exec'd LuCLI. Keep this block in sync with cli/lucli/Module.cfc's
+      # version() and showHelp() — both paths must produce identical output.
+      # Subcommand help (e.g. `wheels migrate --help`) is left to fall through;
+      # LuCLI's preprocessModuleHelp rewrites it to module dispatch.
+      if [ "$#" -eq 1 ]; then
+        case "$1" in
+          --version|-v)
+            ver="unknown"
+            [ -f "$WHEELS_VERSION_DST" ] && ver=$(cat "$WHEELS_VERSION_DST")
+            [ "$ver" = "unknown" ] && [ -f "$WHEELS_VERSION_SRC" ] && ver=$(cat "$WHEELS_VERSION_SRC")
+            echo "Wheels Version: $ver"
+            echo ""
+            echo ' __        ___               _     '
+            echo ' \\ \\      / / |__   ___  ___| |___ '
+            echo '  \\ \\ /\\ / /| '\\''_ \\ / _ \\/ _ \\ / __|'
+            echo '   \\ V  V / | | | |  __/  __/ \\__ \\'
+            echo '    \\_/\\_/  |_| |_|\\___|\\___|_|___/'
+            echo ""
+            echo "https://wheels.dev"
+            exit 0
+            ;;
+          --help|-h)
+            ver="unknown"
+            [ -f "$WHEELS_VERSION_DST" ] && ver=$(cat "$WHEELS_VERSION_DST")
+            [ "$ver" = "unknown" ] && [ -f "$WHEELS_VERSION_SRC" ] && ver=$(cat "$WHEELS_VERSION_SRC")
+            echo "Wheels CLI $ver"
+            echo "  CFML MVC framework — code generation, migrations, testing, server management"
+            echo ""
+            echo "Usage:"
+            echo "  wheels <command> [options]"
+            echo ""
+            echo "Getting Started:"
+            echo "  new <name>          Scaffold a new Wheels application"
+            echo "  start               Start the dev server"
+            echo "  stop                Stop the dev server"
+            echo "  reload              Reload the running app"
+            echo ""
+            echo "Code Generation:"
+            echo "  generate            Generate model, controller, scaffold, migration, etc."
+            echo "  destroy (or d)      Remove generated files"
+            echo ""
+            echo "Database:"
+            echo "  migrate             Run database migrations (latest, up, down, info)"
+            echo "  seed                Run database seeds"
+            echo "  db                  Database management (reset, status, version)"
+            echo ""
+            echo "Testing & Inspection:"
+            echo "  test                Run the test suite"
+            echo "  browser             Browser-based tests (Playwright)"
+            echo "  console             Open an interactive CFML REPL connected to your app"
+            echo "  routes              Print the route table"
+            echo "  info                Show framework version, environment, configuration"
+            echo "  doctor              Diagnose project setup issues"
+            echo "  validate            Validate project structure and configuration"
+            echo "  analyze             Static analysis of project code"
+            echo "  stats               Project statistics (lines of code, model counts, etc.)"
+            echo "  notes               Find TODO / FIXME / HACK / OPTIMIZE comments"
+            echo ""
+            echo "Packages & Deployment:"
+            echo "  packages            Install, update, search Wheels packages"
+            echo "  upgrade             Upgrade the Wheels framework version in your project"
+            echo "  deploy              Deploy your app (Kamal-compatible)"
+            echo ""
+            echo "Other:"
+            echo "  mcp                 Configure Wheels MCP server for AI assistants"
+            echo "  version             Show Wheels CLI version"
+            echo "  help                Show this help"
+            echo ""
+            echo "For command-specific help: wheels <command> --help"
+            echo ""
+            echo "More info: https://guides.wheels.dev"
+            exit 0
+            ;;
+        esac
+      fi
+
       if [ -f "$WHEELS_VERSION_SRC" ]; then
         src_ver=$(cat "$WHEELS_VERSION_SRC")
         dst_ver=""
