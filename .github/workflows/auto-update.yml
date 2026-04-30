@@ -17,6 +17,23 @@ permissions:
   contents: write
   pull-requests: write
 
+# Serialize auto-update runs across all triggers (cron, workflow_dispatch,
+# repository_dispatch). Without this, two repository_dispatch events
+# arriving in quick succession — e.g., rapid-fire snapshot releases on
+# wheels-dev/wheels (snapshot+1659 and +1660 published 39s apart on
+# 2026-04-30) — produced two parallel workflows that each forked an
+# auto-update branch off the same base. Once the first merged, the
+# second's branch conflicted with master and stuck in DIRTY state.
+#
+# cancel-in-progress: false because we want each dispatch to actually
+# bump the formula to that specific version, not skip versions when
+# they pile up. The "Wait for checks and merge" step below holds the
+# concurrency slot until the merge commits, so the next queued run
+# forks off an already-bumped base.
+concurrency:
+  group: auto-update-formula
+  cancel-in-progress: false
+
 jobs:
   check-updates:
     runs-on: macos-latest
@@ -297,7 +314,23 @@ jobs:
           - Module: ${CURRENT_MODULE} -> ${MODULE_VER}" \
             --label "auto-update"
 
-      - name: Enable auto-merge
+      # Synchronous wait-and-merge. Replaces a previous `gh pr merge --auto
+      # --squash` invocation that scheduled the merge for after-checks-pass
+      # and exited immediately — that pattern released the workflow's
+      # concurrency lock before the merge actually committed, allowing the
+      # next queued auto-update run to fork off a stale base. Holding the
+      # slot through the merge means each subsequent run sees an
+      # already-bumped master and produces a clean PR with no conflicts.
+      #
+      # Polls the PR's mergeStateStatus. CLEAN → squash-merge. BLOCKED or
+      # UNSTABLE → required check still pending or transient instability,
+      # keep waiting. DIRTY → unexpected (concurrency group should prevent
+      # it); fail loudly so the issue is visible. BEHIND → upstream moved;
+      # update the branch.
+      #
+      # Caps total wait at 10 min so a stuck check can't block the queue
+      # forever; the audit job normally completes in ~60s.
+      - name: Wait for checks and merge
         if: steps.check.outputs.needs_update == 'true'
         env:
           GH_TOKEN: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
@@ -309,7 +342,43 @@ jobs:
           sanitize() { echo "$1" | tr '+' '-'; }
           BRANCH="auto-update/lucli-$(sanitize "$LUCLI_VER")-module-$(sanitize "$MODULE_VER")"
 
-          PR_URL=$(gh pr list --head "$BRANCH" --json url -q '.[0].url // ""')
-          if [ -n "$PR_URL" ]; then
-            gh pr merge "$PR_URL" --auto --squash
+          PR_NUMBER=$(gh pr list --head "$BRANCH" --json number -q '.[0].number // ""')
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::warning::No open PR found for branch $BRANCH; nothing to merge."
+            exit 0
           fi
+
+          MAX_WAIT=600
+          INTERVAL=15
+          ELAPSED=0
+          STATE=""
+          while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
+            STATE=$(gh pr view "$PR_NUMBER" --json mergeStateStatus -q '.mergeStateStatus')
+            case "$STATE" in
+              CLEAN)
+                echo "PR #$PR_NUMBER is mergeable. Squash-merging..."
+                gh pr merge "$PR_NUMBER" --squash --delete-branch
+                echo "PR #$PR_NUMBER merged."
+                exit 0
+                ;;
+              BLOCKED|UNSTABLE)
+                echo "Waiting (${ELAPSED}s elapsed): mergeStateStatus=$STATE"
+                ;;
+              DIRTY)
+                echo "::error::PR #$PR_NUMBER has conflicts (DIRTY). The serialization concurrency group should have prevented this — investigate."
+                exit 1
+                ;;
+              BEHIND)
+                echo "PR #$PR_NUMBER is BEHIND base; updating branch..."
+                gh pr update-branch "$PR_NUMBER" --rebase || gh pr update-branch "$PR_NUMBER" || true
+                ;;
+              *)
+                echo "Unexpected mergeStateStatus: $STATE — continuing to wait"
+                ;;
+            esac
+            sleep "$INTERVAL"
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+
+          echo "::error::Timed out after ${MAX_WAIT}s waiting for PR #$PR_NUMBER. Last state: $STATE"
+          exit 1
