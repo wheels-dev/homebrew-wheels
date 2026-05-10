@@ -139,8 +139,8 @@ jobs:
 
           if [ -z "${LATEST_MODULE:-}" ]; then
             for attempt in 1 2 3 4 5; do
-              LATEST_MODULE=$(gh api "repos/wheels-dev/wheels/releases?per_page=100" -q '
-                [.[] | select(.draft == false) | select(any(.assets[]; .name | test("wheels-module.*\\.tar\\.gz")))] | .[0].tag_name // ""
+              LATEST_MODULE=$(gh api "repos/wheels-dev/wheels-snapshots/releases?per_page=100" -q '
+                [.[] | select(.draft == false) | select(.prerelease == true) | select(any(.assets[]; .name | test("wheels-module.*\\.tar\\.gz")))] | .[0].tag_name // ""
               ' | sed 's/^v//')
               if [ -n "${LATEST_MODULE// }" ] && [ "$LATEST_MODULE" != "null" ]; then
                 break
