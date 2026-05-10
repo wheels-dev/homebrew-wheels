@@ -1,8 +1,8 @@
-name: Auto-Update Formula
+name: Auto-Update wheels-be Formula
 
 on:
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '15 8 * * *'  # offset from auto-update.yml's :00 to avoid contention
   workflow_dispatch:
   # Fired by wheels-dev/wheels release workflow on every published release
   # (snapshot or final). Cuts the wait between an upstream release and a
@@ -31,7 +31,7 @@ permissions:
 # concurrency slot until the merge commits, so the next queued run
 # forks off an already-bumped base.
 concurrency:
-  group: auto-update-formula
+  group: bleeding-edge-update-formula
   cancel-in-progress: false
 
 jobs:
@@ -60,32 +60,26 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Channel filter — skip non-stable dispatches. The wheels-dev/wheels
-          # release.yml now sends a `channel` field in the dispatch payload
-          # (stable / bleeding-edge / release-candidate). Bleeding-edge dispatches
-          # are handled by bleeding-edge-update.yml in this repo, which writes
-          # Formula/wheels-be.rb. Without this gate, this workflow would bump
-          # Formula/wheels.rb on every snapshot — which was the pre-4.0 behavior
-          # we're fixing as part of the channel split.
+          # Channel filter — skip non-bleeding-edge dispatches. Stable releases
+          # are handled by auto-update.yml in this repo, which writes
+          # Formula/wheels.rb. This workflow only acts on bleeding-edge
+          # snapshot publishes from wheels-dev/wheels-snapshots.
           #
           # Manual triggers (workflow_dispatch) and cron always proceed: they
-          # have no client_payload so DISPATCH_CHANNEL is empty and the sniff
-          # below classifies whatever the API returns as the actual channel.
+          # check the snapshots repo for the latest pre-release.
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
             CHANNEL="${DISPATCH_CHANNEL:-}"
             # Backwards compat: if channel field is empty, sniff version string.
             if [ -z "${CHANNEL}" ] && [ -n "${DISPATCH_VERSION:-}" ]; then
               if echo "${DISPATCH_VERSION}" | grep -qiE '\-snapshot[\.\+]'; then
                 CHANNEL="bleeding-edge"
-              elif echo "${DISPATCH_VERSION}" | grep -qE '\-rc\.'; then
-                CHANNEL="release-candidate"
               else
                 CHANNEL="stable"
               fi
             fi
             echo "Dispatch channel: ${CHANNEL:-stable (default)}"
-            if [ "${CHANNEL}" = "bleeding-edge" ] || [ "${CHANNEL}" = "release-candidate" ]; then
-              echo "Skipping — non-stable channel handled by bleeding-edge-update.yml"
+            if [ "${CHANNEL}" != "bleeding-edge" ]; then
+              echo "Skipping — channel '${CHANNEL}' is not bleeding-edge (handled by auto-update.yml)"
               echo "needs_update=false" >> "$GITHUB_OUTPUT"
               echo "current_lucli=skip" >> "$GITHUB_OUTPUT"
               echo "current_module=skip" >> "$GITHUB_OUTPUT"
@@ -106,8 +100,8 @@ jobs:
             fi
           }
 
-          CURRENT_LUCLI=$(grep "LUCLI_VERSION" Formula/wheels.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          CURRENT_MODULE=$(grep "MODULE_VERSION" Formula/wheels.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          CURRENT_LUCLI=$(grep "LUCLI_VERSION" Formula/wheels-be.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          CURRENT_MODULE=$(grep "MODULE_VERSION" Formula/wheels-be.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
           validate_version "CURRENT_LUCLI" "$CURRENT_LUCLI"
           validate_version "CURRENT_MODULE" "$CURRENT_MODULE"
           echo "current_lucli=$CURRENT_LUCLI" >> "$GITHUB_OUTPUT"
@@ -201,7 +195,7 @@ jobs:
 
           # Module tarball is required now that MODULE_VERSION validation is strict —
           # fail the workflow if the advertised release doesn't actually have the asset.
-          curl -sfL "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-module-${MODULE_VER}.tar.gz" -o /tmp/wheels-module.tar.gz
+          curl -sfL "https://github.com/wheels-dev/wheels-snapshots/releases/download/v${MODULE_VER}/wheels-module-${MODULE_VER}.tar.gz" -o /tmp/wheels-module.tar.gz
           MODULE_SHA=$(shasum -a 256 /tmp/wheels-module.tar.gz | awk '{print $1}')
           require_sha "MODULE_SHA" "$MODULE_SHA"
           echo "module_sha=$MODULE_SHA" >> "$GITHUB_OUTPUT"
@@ -209,7 +203,7 @@ jobs:
           # Framework-source zip — required so `wheels new` can boot the scaffold.
           # See wheels-dev/wheels PR 2294 for the release-workflow fix that
           # started publishing this artifact on snapshots.
-          curl -sfL "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-core-${MODULE_VER}.zip" -o /tmp/wheels-core.zip
+          curl -sfL "https://github.com/wheels-dev/wheels-snapshots/releases/download/v${MODULE_VER}/wheels-core-${MODULE_VER}.zip" -o /tmp/wheels-core.zip
           CORE_SHA=$(shasum -a 256 /tmp/wheels-core.zip | awk '{print $1}')
           require_sha "CORE_SHA" "$CORE_SHA"
           echo "core_sha=$CORE_SHA" >> "$GITHUB_OUTPUT"
@@ -236,8 +230,8 @@ jobs:
             fi
           done
 
-          sed -i '' "s/LUCLI_VERSION = \".*\"/LUCLI_VERSION = \"${LUCLI_VER}\"/" Formula/wheels.rb
-          sed -i '' "s/MODULE_VERSION = \".*\"/MODULE_VERSION = \"${MODULE_VER}\"/" Formula/wheels.rb
+          sed -i '' "s/LUCLI_VERSION = \".*\"/LUCLI_VERSION = \"${LUCLI_VER}\"/" Formula/wheels-be.rb
+          sed -i '' "s/MODULE_VERSION = \".*\"/MODULE_VERSION = \"${MODULE_VER}\"/" Formula/wheels-be.rb
 
           python3 << 'PYEOF'
           import re, os
@@ -246,7 +240,7 @@ jobs:
           module_sha = os.environ["MODULE_SHA"]
           core_sha = os.environ["CORE_SHA"]
 
-          with open("Formula/wheels.rb", "r") as f:
+          with open("Formula/wheels-be.rb", "r") as f:
               content = f.read()
 
           # Update each sha256 by anchoring on context unique to its target,
@@ -267,7 +261,7 @@ jobs:
                   raise SystemExit(f"::error::Expected exactly 1 match for sha256 pattern, got {n}: {pattern}")
               content = new_content
 
-          with open("Formula/wheels.rb", "w") as f:
+          with open("Formula/wheels-be.rb", "w") as f:
               f.write(content)
           PYEOF
 
@@ -278,21 +272,21 @@ jobs:
 
           # Post-write verification: re-read the formula and confirm no constant is empty.
           # This catches regressions in the sed/python rewrite logic.
-          WROTE_LUCLI=$(grep "LUCLI_VERSION" Formula/wheels.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          WROTE_MODULE=$(grep "MODULE_VERSION" Formula/wheels.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          WROTE_LUCLI=$(grep "LUCLI_VERSION" Formula/wheels-be.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          WROTE_MODULE=$(grep "MODULE_VERSION" Formula/wheels-be.rb | head -1 | sed 's/.*"\(.*\)".*/\1/')
 
           if [ -z "${WROTE_LUCLI// }" ] || [ "$WROTE_LUCLI" = "null" ]; then
-            echo "::error::Formula/wheels.rb has empty or invalid LUCLI_VERSION after rewrite: '$WROTE_LUCLI'" >&2
+            echo "::error::Formula/wheels-be.rb has empty or invalid LUCLI_VERSION after rewrite: '$WROTE_LUCLI'" >&2
             exit 1
           fi
           if [ -z "${WROTE_MODULE// }" ] || [ "$WROTE_MODULE" = "null" ]; then
-            echo "::error::Formula/wheels.rb has empty or invalid MODULE_VERSION after rewrite: '$WROTE_MODULE'" >&2
+            echo "::error::Formula/wheels-be.rb has empty or invalid MODULE_VERSION after rewrite: '$WROTE_MODULE'" >&2
             exit 1
           fi
 
           # Reject any URL that would resolve to a 404 because of empty interpolation.
           # Example failure: "v/wheels-module-.tar.gz" (what broke in cf9b215).
-          if grep -E 'releases/download/v/|/wheels-module-\.tar\.gz|/lucli--(macos|linux)' Formula/wheels.rb; then
+          if grep -E 'releases/download/v/|/wheels-module-\.tar\.gz|/lucli--(macos|linux)' Formula/wheels-be.rb; then
             echo "::error::Formula contains a malformed URL suggestive of empty version interpolation." >&2
             exit 1
           fi
@@ -310,12 +304,12 @@ jobs:
           ln -sfn "$GITHUB_WORKSPACE" "$TAP_DIR"
 
           # Strict audit catches syntax errors, malformed URLs, missing SHAs, etc.
-          brew audit --strict wheels-dev/wheels/wheels
+          brew audit --strict wheels-dev/wheels/wheels-be
 
           # `brew fetch` resolves and downloads the main URL + all resources
           # without running the install. This catches 404s on the module tarball
           # URL — exactly the failure mode of cf9b215 — before we ever open a PR.
-          brew fetch --retry wheels-dev/wheels/wheels
+          brew fetch --retry wheels-dev/wheels/wheels-be
 
       - name: Create PR
         if: steps.check.outputs.needs_update == 'true'
@@ -333,17 +327,17 @@ jobs:
 
           # Sanitize version strings for branch names (+ is legal but noisy in refs).
           sanitize() { echo "$1" | tr '+' '-'; }
-          BRANCH="auto-update/lucli-$(sanitize "$LUCLI_VER")-module-$(sanitize "$MODULE_VER")"
+          BRANCH="auto-update/wheels-be-lucli-$(sanitize "$LUCLI_VER")-module-$(sanitize "$MODULE_VER")"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add Formula/wheels.rb
-          git commit -m "chore: update to LuCLI ${LUCLI_VER}, module ${MODULE_VER}"
+          git add Formula/wheels-be.rb
+          git commit -m "chore: update wheels-be to LuCLI ${LUCLI_VER}, module ${MODULE_VER}"
           git push origin "$BRANCH"
 
           gh pr create \
-            --title "chore: update to LuCLI ${LUCLI_VER}, module ${MODULE_VER}" \
+            --title "chore: update wheels-be to LuCLI ${LUCLI_VER}, module ${MODULE_VER}" \
             --body "Auto-update from upstream releases.
 
           - LuCLI: ${CURRENT_LUCLI} -> ${LUCLI_VER}
@@ -376,7 +370,7 @@ jobs:
           set -euo pipefail
 
           sanitize() { echo "$1" | tr '+' '-'; }
-          BRANCH="auto-update/lucli-$(sanitize "$LUCLI_VER")-module-$(sanitize "$MODULE_VER")"
+          BRANCH="auto-update/wheels-be-lucli-$(sanitize "$LUCLI_VER")-module-$(sanitize "$MODULE_VER")"
 
           PR_NUMBER=$(gh pr list --head "$BRANCH" --json number -q '.[0].number // ""')
           if [ -z "$PR_NUMBER" ]; then
