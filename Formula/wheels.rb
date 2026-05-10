@@ -43,6 +43,14 @@ class Wheels < Formula
 
   depends_on "openjdk@21"
 
+  # Mutually exclusive with the bleeding-edge wheels-be formula. Both expose
+  # `bin/wheels`, so brew refuses to install both — user must explicitly switch:
+  #   brew uninstall wheels && brew install wheels-be   # stable -> BE
+  #   brew uninstall wheels-be && brew install wheels   # BE -> stable
+  # brew's conflicts_with is symmetric — both formulas must declare the
+  # conflict or `brew audit --strict` rejects the pair.
+  conflicts_with "wheels-dev/wheels/wheels-be", because: "both wheels and wheels-be install the wheels CLI binary"
+
   def install
     binary = Dir["*"].first
     libexec.install binary => "wheels"
