@@ -585,7 +585,18 @@ class WheelsBe < Formula
     # Verify both: the intercepted path AND a real LuCLI subcommand.
     version_output = shell_output("#{bin}/wheels --version")
     assert_match(/\d+\.\d+\.\d+/, version_output)
-    assert_match(/\(bleeding-edge\)/, version_output, "bleeding-edge channel tag missing from --version banner")
+
+    # Channel-tag check mirrors the version's snapshot-suffix presence — same
+    # derivation as in wheels.rb. For wheels-be the MODULE_VERSION always
+    # contains "snapshot" by definition, but mirroring the check keeps both
+    # formulas' test blocks structurally identical (drift-resistant).
+    expected_channel = if /snapshot/i.match?(MODULE_VERSION)
+      "(bleeding-edge)"
+    else
+      "(stable)"
+    end
+    assert_match(/#{Regexp.escape(expected_channel)}/, version_output,
+                 "channel tag #{expected_channel} missing from --version banner (MODULE_VERSION=#{MODULE_VERSION})")
 
     # `wheels new` exercises the full dispatch chain (bin/wheels wrapper -> exec
     # libexec/wheels -> LuCLI -> our module's new command). PRs #178 / #179

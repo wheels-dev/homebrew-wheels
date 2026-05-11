@@ -587,7 +587,19 @@ class Wheels < Formula
     # Verify both: the intercepted path AND a real LuCLI subcommand.
     version_output = shell_output("#{bin}/wheels --version")
     assert_match(/\d+\.\d+\.\d+/, version_output)
-    assert_match(/\(stable\)/, version_output, "stable channel tag missing from --version banner")
+
+    # Pre-GA, the stable formula intentionally pins a snapshot MODULE_VERSION
+    # (4.0.0-SNAPSHOT+N) until v4.0.0 tags. The wrapper banner correctly
+    # reports "(bleeding-edge)" for that. Post-GA when MODULE_VERSION becomes
+    # "4.0.0" (no snapshot suffix), the banner reports "(stable)". The test
+    # mirrors that derivation so it stays green across both pre- and post-GA.
+    expected_channel = if /snapshot/i.match?(MODULE_VERSION)
+      "(bleeding-edge)"
+    else
+      "(stable)"
+    end
+    assert_match(/#{Regexp.escape(expected_channel)}/, version_output,
+                 "channel tag #{expected_channel} missing from --version banner (MODULE_VERSION=#{MODULE_VERSION})")
 
     # `wheels new` exercises the full dispatch chain (bin/wheels wrapper -> exec
     # libexec/wheels -> LuCLI -> our module's new command). PRs #178 / #179
