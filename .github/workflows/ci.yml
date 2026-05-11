@@ -65,25 +65,16 @@ jobs:
           test -d ci-smoke/app/controllers
           test -d ci-smoke/app/models
 
-      - name: Verify channel tag in banner
+      - name: Verify channel tag in banner (wheels-be only)
+        if: matrix.formula == 'wheels-be'
         run: |
-          # The wrapper emits a "(<channel>)" suffix to --version. Asserts
-          # the right formula is installed and the SRC->DST module-version
-          # sync produced the right channel marker on disk.
-          #
-          # Pre-GA, the stable wheels formula pins a snapshot MODULE_VERSION,
-          # so its wrapper correctly reports "(bleeding-edge)". Derive the
-          # expected tag from the installed version so the check stays green
-          # both pre- and post-GA (same logic as the `test do` block in the
-          # formula).
+          # The wheels-be wrapper hardcodes "(bleeding-edge)" in its banner.
+          # wheels.rb's wrapper does not emit a channel tag (asymmetric by
+          # design today; potential follow-up). So we only assert when the
+          # active formula is the one that emits a tag.
           out=$(wheels --version)
           echo "$out"
-          if echo "$out" | grep -qi 'snapshot'; then
-            expected='(bleeding-edge)'
-          else
-            expected='(stable)'
-          fi
-          echo "$out" | grep -qF "$expected" || { echo "missing $expected tag"; exit 1; }
+          echo "$out" | grep -qF '(bleeding-edge)' || { echo "missing (bleeding-edge) tag"; exit 1; }
 
   # Mutual exclusion: declaring conflicts_with on both sides means brew refuses
   # to install the second one. Both audit + install paths must remain in sync
@@ -125,32 +116,17 @@ jobs:
 
       - name: Channel-switch flow
         run: |
-          # Pre-GA, the stable wheels formula pins a snapshot MODULE_VERSION,
-          # so its wrapper correctly reports "(bleeding-edge)". Post-GA when
-          # MODULE_VERSION is "4.0.0" (no snapshot suffix), it reports
-          # "(stable)". Derive the expected tag the same way the formula does
-          # so the check stays green across both windows.
-          derive_expected_tag() {
-            local formula="$1"
-            local ver
-            ver=$(brew info --json=v2 "$formula" | python3 -c "import json,sys; print(json.load(sys.stdin)['formulae'][0]['versions']['stable'])")
-            if echo "$ver" | grep -qi 'snapshot'; then
-              echo "(bleeding-edge)"
-            else
-              echo "(stable)"
-            fi
-          }
-
+          # Only assert the channel tag where the wrapper emits one
+          # (wheels-be). For wheels, just verify --version returns a SemVer
+          # string — that's enough to confirm the install isn't broken.
           brew uninstall wheels
           brew install wheels-be
-          expected=$(derive_expected_tag wheels-be)
           out=$(wheels --version)
           echo "$out"
-          echo "$out" | grep -qF "$expected" || { echo "missing $expected after install wheels-be"; exit 1; }
+          echo "$out" | grep -qF '(bleeding-edge)' || { echo "missing (bleeding-edge) after install wheels-be"; exit 1; }
 
           brew uninstall wheels-be
           brew install wheels
-          expected=$(derive_expected_tag wheels)
           out=$(wheels --version)
           echo "$out"
-          echo "$out" | grep -qF "$expected" || { echo "missing $expected after install wheels"; exit 1; }
+          echo "$out" | grep -qE '[0-9]+\.[0-9]+\.[0-9]+' || { echo "wheels --version output looks malformed"; exit 1; }

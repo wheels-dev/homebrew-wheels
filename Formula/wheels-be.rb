@@ -582,21 +582,16 @@ class WheelsBe < Formula
 
     # --version is intercepted by the wrapper before LuCLI loads, so a passing
     # --version does NOT mean the underlying libexec dispatcher is wired up.
-    # Verify both: the intercepted path AND a real LuCLI subcommand.
+    # Verify both: the intercepted path AND a real LuCLI subcommand below.
     version_output = shell_output("#{bin}/wheels --version")
     assert_match(/\d+\.\d+\.\d+/, version_output)
 
-    # Channel-tag check mirrors the version's snapshot-suffix presence — same
-    # derivation as in wheels.rb. For wheels-be the MODULE_VERSION always
-    # contains "snapshot" by definition, but mirroring the check keeps both
-    # formulas' test blocks structurally identical (drift-resistant).
-    expected_channel = if /snapshot/i.match?(MODULE_VERSION)
-      "(bleeding-edge)"
-    else
-      "(stable)"
-    end
-    assert_match(/#{Regexp.escape(expected_channel)}/, version_output,
-                 "channel tag #{expected_channel} missing from --version banner (MODULE_VERSION=#{MODULE_VERSION})")
+    # The wheels-be wrapper hardcodes "(bleeding-edge)" in its banner because
+    # the package definitionally tracks the BE channel. (wheels.rb's wrapper
+    # does not emit a channel tag — that asymmetry is intentional for now;
+    # a follow-up could derive channel from version in both wrappers.)
+    assert_match(/\(bleeding-edge\)/, version_output,
+                 "bleeding-edge channel tag missing from --version banner")
 
     # `wheels new` exercises the full dispatch chain (bin/wheels wrapper -> exec
     # libexec/wheels -> LuCLI -> our module's new command). PRs #178 / #179
