@@ -84,7 +84,7 @@ class Wheels < Formula
 
     (bin/"wheels").write <<~EOS
       #!/bin/bash
-      BREW_PREFIX="#{HOMEBREW_PREFIX}/opt/wheels"
+      BREW_PREFIX="#{opt_prefix}"
       WHEELS_MODULE_SRC="$BREW_PREFIX/share/wheels/module"
       WHEELS_MODULE_DST="$HOME/.wheels/modules/wheels"
       WHEELS_FRAMEWORK_SRC="$BREW_PREFIX/share/wheels/framework/wheels"
