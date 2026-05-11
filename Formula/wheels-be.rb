@@ -579,6 +579,21 @@ class WheelsBe < Formula
     assert_predicate share/"wheels/module/Module.cfc", :exist?
     assert_predicate share/"wheels/framework/wheels", :exist?
     assert_predicate share/"wheels/lib/sqlite-jdbc-#{SQLITE_JDBC_VERSION}.jar", :exist?
-    assert_match(/\d+\.\d+\.\d+/, shell_output("#{bin}/wheels --version"))
+
+    # --version is intercepted by the wrapper before LuCLI loads, so a passing
+    # --version does NOT mean the underlying libexec dispatcher is wired up.
+    # Verify both: the intercepted path AND a real LuCLI subcommand.
+    version_output = shell_output("#{bin}/wheels --version")
+    assert_match(/\d+\.\d+\.\d+/, version_output)
+    assert_match(/\(bleeding-edge\)/, version_output, "bleeding-edge channel tag missing from --version banner")
+
+    # `wheels new` exercises the full dispatch chain (bin/wheels wrapper -> exec
+    # libexec/wheels -> LuCLI -> our module's new command). PRs #178 / #179
+    # broke this path without breaking --version, because --version is
+    # intercepted before the exec. This assertion catches that class of bug.
+    testpath_app = testpath/"smoke-app"
+    system bin/"wheels", "new", testpath_app.basename.to_s
+    assert_predicate testpath_app/"config/settings.cfm", :exist?, "wheels new failed to scaffold app"
+    assert_predicate testpath_app/"app/controllers", :directory?, "wheels new scaffold missing app/controllers"
   end
 end

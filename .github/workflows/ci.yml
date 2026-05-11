@@ -2,9 +2,90 @@ name: CI
 
 on:
   pull_request:
+  push:
+    branches: [master]
 
 jobs:
-  audit:
+  # Runs audit + install + test for ONE formula across macos and linux.
+  # Matrix keeps the wheels and wheels-be paths independent so one failure
+  # doesn't mask another. Mutual-exclusion is verified in a separate job
+  # below (it's by definition not a per-formula concern).
+  formula:
+    name: ${{ matrix.formula }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        formula: [wheels, wheels-be]
+    env:
+      # Hoist matrix values into env to satisfy the workflow-injection linter.
+      # Both are literal allowlist values (matrix is defined in this file),
+      # not untrusted input, but env: keeps the run blocks consistent with
+      # the team-wide pattern.
+      FORMULA: ${{ matrix.formula }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Homebrew (linux)
+        if: runner.os == 'Linux'
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Tap this repo
+        run: |
+          mkdir -p "$(brew --repository)/Library/Taps/wheels-dev"
+          ln -s "$GITHUB_WORKSPACE" "$(brew --repository)/Library/Taps/wheels-dev/homebrew-wheels"
+
+      - name: Audit formula
+        run: brew audit --strict "$FORMULA"
+
+      - name: Install formula
+        run: brew install "$FORMULA"
+
+      - name: Verify CLI on PATH
+        run: |
+          which wheels
+          wheels --version
+
+      # `brew test` exercises the assertions in the formula's `test do` block,
+      # which now includes a real `wheels new` invocation. That covers the
+      # PR #178 / #179 regression class — bugs in libexec/wheels or the
+      # wrapper's exec path that --version-only smoke tests would miss.
+      - name: Test formula
+        run: brew test "$FORMULA"
+
+      - name: Smoke test - scaffold app outside brew sandbox
+        run: |
+          # `brew test` runs in a sandboxed temp dir that gets cleaned up.
+          # Re-run the same scaffold in $RUNNER_TEMP to verify the install
+          # works under realistic user conditions (no test-mode mocks).
+          cd "$RUNNER_TEMP"
+          wheels new ci-smoke
+          test -f ci-smoke/config/settings.cfm
+          test -d ci-smoke/app/controllers
+          test -d ci-smoke/app/models
+
+      - name: Verify channel tag in banner
+        run: |
+          # The wrapper emits a "(<channel>)" suffix to --version. Asserts
+          # the right formula is installed and the SRC->DST module-version
+          # sync produced the right channel marker on disk.
+          out=$(wheels --version)
+          echo "$out"
+          case "$FORMULA" in
+            wheels)
+              echo "$out" | grep -q '(stable)' || { echo "missing (stable) tag"; exit 1; }
+              ;;
+            wheels-be)
+              echo "$out" | grep -q '(bleeding-edge)' || { echo "missing (bleeding-edge) tag"; exit 1; }
+              ;;
+          esac
+
+  # Mutual exclusion: declaring conflicts_with on both sides means brew refuses
+  # to install the second one. Both audit + install paths must remain in sync
+  # so this stays enforced (`brew audit --strict` rejects asymmetric pairs).
+  mutual-exclusion:
+    name: conflicts_with is enforced
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,11 +95,32 @@ jobs:
           mkdir -p "$(brew --repository)/Library/Taps/wheels-dev"
           ln -s "$GITHUB_WORKSPACE" "$(brew --repository)/Library/Taps/wheels-dev/homebrew-wheels"
 
-      - name: Audit formula
-        run: brew audit --strict wheels
-
-      - name: Install formula
+      - name: Install wheels first
         run: brew install wheels
 
-      - name: Test formula
-        run: brew test wheels
+      - name: Attempt wheels-be install (must fail)
+        run: |
+          # `brew install` should fail with "wheels-be cannot be installed
+          # alongside wheels". If it succeeds, mutual exclusion is broken.
+          if brew install wheels-be 2>&1 | tee /tmp/install.log; then
+            echo "ERROR: brew install wheels-be succeeded while wheels was already installed"
+            echo "This means conflicts_with is not declared on at least one side."
+            exit 1
+          fi
+          grep -qi 'conflicts' /tmp/install.log || {
+            echo "ERROR: install failed but not for a conflicts_with reason"
+            cat /tmp/install.log
+            exit 1
+          }
+          echo "OK - mutual exclusion enforced"
+
+      - name: Channel-switch flow
+        run: |
+          # Verify the documented switch sequence works
+          brew uninstall wheels
+          brew install wheels-be
+          wheels --version | grep -q '(bleeding-edge)'
+
+          brew uninstall wheels-be
+          brew install wheels
+          wheels --version | grep -q '(stable)'
