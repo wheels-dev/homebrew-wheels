@@ -105,9 +105,13 @@ class Wheels < Formula
       if [ "$#" -eq 1 ]; then
         case "$1" in
           --version|-v)
+            # Prefer brew-installed version (SRC) over runtime cache (DST). SRC
+            # always reflects what brew thinks is installed; DST may be stale
+            # right after `brew install` / `brew upgrade` / channel switch
+            # (the runtime cache syncs lazily on the next non-help command).
             ver="unknown"
-            [ -f "$WHEELS_VERSION_DST" ] && ver=$(cat "$WHEELS_VERSION_DST")
-            [ "$ver" = "unknown" ] && [ -f "$WHEELS_VERSION_SRC" ] && ver=$(cat "$WHEELS_VERSION_SRC")
+            [ -f "$WHEELS_VERSION_SRC" ] && ver=$(cat "$WHEELS_VERSION_SRC")
+            [ "$ver" = "unknown" ] && [ -f "$WHEELS_VERSION_DST" ] && ver=$(cat "$WHEELS_VERSION_DST")
             echo "Wheels Version: $ver"
             echo ""
             echo ' __        ___               _     '
@@ -120,9 +124,13 @@ class Wheels < Formula
             exit 0
             ;;
           --help|-h)
+            # Prefer brew-installed version (SRC) over runtime cache (DST). SRC
+            # always reflects what brew thinks is installed; DST may be stale
+            # right after `brew install` / `brew upgrade` / channel switch
+            # (the runtime cache syncs lazily on the next non-help command).
             ver="unknown"
-            [ -f "$WHEELS_VERSION_DST" ] && ver=$(cat "$WHEELS_VERSION_DST")
-            [ "$ver" = "unknown" ] && [ -f "$WHEELS_VERSION_SRC" ] && ver=$(cat "$WHEELS_VERSION_SRC")
+            [ -f "$WHEELS_VERSION_SRC" ] && ver=$(cat "$WHEELS_VERSION_SRC")
+            [ "$ver" = "unknown" ] && [ -f "$WHEELS_VERSION_DST" ] && ver=$(cat "$WHEELS_VERSION_DST")
             echo "Wheels CLI $ver"
             echo "  CFML MVC framework — code generation, migrations, testing, server management"
             echo ""
