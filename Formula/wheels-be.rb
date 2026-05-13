@@ -3,7 +3,7 @@ class WheelsBe < Formula
   homepage "https://wheels.dev"
 
   LUCLI_VERSION = "0.3.7"
-  MODULE_VERSION = "4.0.1-snapshot.1843"
+  MODULE_VERSION = "4.0.1-snapshot.1844"
   SQLITE_JDBC_VERSION = "3.49.1.0"
 
   # Track the framework version, not the LuCLI wrapper version. The wheels
@@ -23,12 +23,12 @@ class WheelsBe < Formula
 
   resource "wheels_module" do
     url "https://github.com/wheels-dev/wheels-snapshots/releases/download/v#{MODULE_VERSION}/wheels-module-#{MODULE_VERSION}.tar.gz"
-    sha256 "8e8856911335365d5a9f0df56d09a08055d0076e86a5573eb9a0e999d10893b0"
+    sha256 "43653a55127cb41eabb1c6a849f4aa55fb081d4b3fbe6818f29cd08d82cfa38e"
   end
 
   resource "wheels_core" do
     url "https://github.com/wheels-dev/wheels-snapshots/releases/download/v#{MODULE_VERSION}/wheels-core-#{MODULE_VERSION}.zip"
-    sha256 "96851d0344b4f7bb6b879d6ecf60f7f20f7e644e7e1347ec72e1cc688e992f4b"
+    sha256 "9454d195b42270db93dcf519b27f20f798bc9bee53c0a411541580f1f505d1b3"
   end
 
   # SQLite JDBC driver for the zero-config datasource emitted by `wheels new`.
