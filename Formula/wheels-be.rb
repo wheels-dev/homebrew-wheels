@@ -2,8 +2,8 @@ class WheelsBe < Formula
   desc "CLI for the Wheels MVC framework — bleeding-edge channel (develop snapshots)"
   homepage "https://wheels.dev"
 
-  LUCLI_VERSION = "0.3.17"
-  MODULE_VERSION = "4.0.3-snapshot.1998"
+  LUCLI_VERSION = "0.4.0"
+  MODULE_VERSION = "4.0.6-snapshot.2204"
   SQLITE_JDBC_VERSION = "3.49.1.0"
 
   # Track the framework version, not the LuCLI wrapper version. The wheels
@@ -15,20 +15,20 @@ class WheelsBe < Formula
 
   if OS.mac?
     url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
-    sha256 "cf97659bec46ec30ec41329a9d25d75d3a84add584541cd918683389f5823403"
+    sha256 "2f6a15df144c48c4282a68adedb608a9d8fd69d5df6396c54840b7ea11bddc63"
   elsif OS.linux?
     url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-linux"
-    sha256 "1e027d932b06db2d381f7f67cc6cac45b0e1004f8a857959f7f8574a50d4aac4"
+    sha256 "2f6a15df144c48c4282a68adedb608a9d8fd69d5df6396c54840b7ea11bddc63"
   end
 
   resource "wheels_module" do
     url "https://github.com/wheels-dev/wheels-snapshots/releases/download/v#{MODULE_VERSION}/wheels-module-#{MODULE_VERSION}.tar.gz"
-    sha256 "b8c4651a1a56b048c01f50d174fb7a3a2d4c252961f0c59860a32e0ac33680fc"
+    sha256 "24f754d9565d49e7aeb7e9fe2eccfcfe88949472ea4805c4b68b5279c0a32188"
   end
 
   resource "wheels_core" do
     url "https://github.com/wheels-dev/wheels-snapshots/releases/download/v#{MODULE_VERSION}/wheels-core-#{MODULE_VERSION}.zip"
-    sha256 "ddae524763b0d9bcc004a234c31593e713f5520b0f5786c5a444cd946a3bd5e2"
+    sha256 "2e2a8255c971242c05e51ecd6d4f24eddc57241b8b09f8fd69ea97bfe0713267"
   end
 
   # SQLite JDBC driver for the zero-config datasource emitted by `wheels new`.
