@@ -113,7 +113,15 @@ jobs:
           echo "current_lucli=$CURRENT_LUCLI" >> "$GITHUB_OUTPUT"
           echo "current_module=$CURRENT_MODULE" >> "$GITHUB_OUTPUT"
 
-          LATEST_LUCLI=$(gh release view --repo cybersonic/LuCLI --json tagName -q '.tagName' | sed 's/^v//')
+          # PINNED to 0.3.17 (2026-06-19). LuCLI v0.3.18 shipped with no
+          # binaries (the cybersonic/LuCLI release has only RELEASE.md), so
+          # auto-deriving the latest tag made the SHA-compute step download a
+          # 404 and fail with exit 56 (blocking every wheels release bump).
+          # LuCLI is also mid-migration to the lucee org, which will change the
+          # download host/URLs. Revert to the `gh release view` auto-derivation
+          # once LuCLI publishes binaries again under its new home.
+          #   LATEST_LUCLI=$(gh release view --repo cybersonic/LuCLI --json tagName -q '.tagName' | sed 's/^v//')
+          LATEST_LUCLI="0.3.17"
           validate_version "LATEST_LUCLI" "$LATEST_LUCLI"
           echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 
