@@ -317,6 +317,11 @@ jobs:
           mkdir -p "$(dirname "$TAP_DIR")"
           ln -sfn "$GITHUB_WORKSPACE" "$TAP_DIR"
 
+          # Homebrew 6.0+ refuses to load formulae from untrusted third-party
+          # taps. Same trust step as bleeding-edge-update.yml — needed because
+          # wheels conflicts_with wheels-be and brew loads both formulae.
+          brew trust wheels-dev/wheels
+
           # Strict audit catches syntax errors, malformed URLs, missing SHAs, etc.
           brew audit --strict wheels-dev/wheels/wheels
 

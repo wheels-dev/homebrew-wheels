@@ -139,15 +139,19 @@ jobs:
 
           if [ -z "${LATEST_MODULE:-}" ]; then
             for attempt in 1 2 3 4 5; do
-              LATEST_MODULE=$(gh api "repos/wheels-dev/wheels-snapshots/releases?per_page=100" -q '
-                [.[] | select(.draft == false) | select(.prerelease == true) | select(any(.assets[]; .name | test("wheels-module.*\\.tar\\.gz")))] | .[0].tag_name // ""
-              ' | sed 's/^v//')
-              if [ -n "${LATEST_MODULE// }" ] && [ "$LATEST_MODULE" != "null" ]; then
+              # Same source scoop-wheels checkver uses on main
+              # (bucket/wheels-be.json): GET wheels-snapshots/releases?per_page=1
+              # and take $[0].tag_name matching vX.Y.Z-snapshot.N. Do not scan
+              # 100 releases or filter prerelease/asset flags — scoop's live
+              # path is the known-good sibling.
+              LATEST_MODULE=$(gh api "repos/wheels-dev/wheels-snapshots/releases?per_page=1" -q '.[0].tag_name // ""' | sed 's/^v//')
+              if echo "${LATEST_MODULE}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+-snapshot\.[0-9]+$'; then
                 break
               fi
               backoff=$((attempt * 15))
-              echo "Attempt ${attempt}/5: API returned no release with wheels-module-*.tar.gz asset; retrying in ${backoff}s..."
+              echo "Attempt ${attempt}/5: wheels-snapshots latest tag is not a snapshot ('${LATEST_MODULE}'); retrying in ${backoff}s..."
               sleep "$backoff"
+              LATEST_MODULE=""
             done
           fi
           validate_version "LATEST_MODULE" "$LATEST_MODULE"
@@ -302,6 +306,14 @@ jobs:
           TAP_DIR="$(brew --repository)/Library/Taps/wheels-dev/homebrew-wheels"
           mkdir -p "$(dirname "$TAP_DIR")"
           ln -sfn "$GITHUB_WORKSPACE" "$TAP_DIR"
+
+          # Homebrew 6.0+ refuses to load formulae from untrusted third-party
+          # taps. This tap is the one under test. wheels-be also conflicts_with
+          # the sibling wheels formula, so brew loads both. Without an explicit
+          # trust, audit dies with "Refusing to load formula ... from untrusted
+          # tap" — the failure that stalled wheels-be after PR #409. Scoop's
+          # sibling autoupdate never hits this path (checkver + sha512 sidecars).
+          brew trust wheels-dev/wheels
 
           # Strict audit catches syntax errors, malformed URLs, missing SHAs, etc.
           brew audit --strict wheels-dev/wheels/wheels-be
