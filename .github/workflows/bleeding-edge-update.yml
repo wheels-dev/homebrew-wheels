@@ -107,7 +107,12 @@ jobs:
           echo "current_lucli=$CURRENT_LUCLI" >> "$GITHUB_OUTPUT"
           echo "current_module=$CURRENT_MODULE" >> "$GITHUB_OUTPUT"
 
-          LATEST_LUCLI=$(gh release view --repo cybersonic/LuCLI --json tagName -q '.tagName' | sed 's/^v//')
+          # PINNED to 0.6.2 — a fork-built hotfix of 0.6.1 carrying the
+          # routeCommand() fix for aliased binaries (e.g. `wheels`) run from a
+          # directory containing a same-named entry. Revert to auto-derivation
+          # once upstream releases the fix (cybersonic/LuCLI#123):
+          #   LATEST_LUCLI=$(gh release view --repo cybersonic/LuCLI --json tagName -q '.tagName' | sed 's/^v//')
+          LATEST_LUCLI="0.6.2"
           validate_version "LATEST_LUCLI" "$LATEST_LUCLI"
           echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 
@@ -187,12 +192,12 @@ jobs:
             fi
           }
 
-          curl -sfL "https://github.com/cybersonic/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" -o /tmp/lucli-macos
+          curl -sfL "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" -o /tmp/lucli-macos
           MACOS_SHA=$(shasum -a 256 /tmp/lucli-macos | awk '{print $1}')
           require_sha "MACOS_SHA" "$MACOS_SHA"
           echo "macos_sha=$MACOS_SHA" >> "$GITHUB_OUTPUT"
 
-          curl -sfL "https://github.com/cybersonic/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" -o /tmp/lucli-linux
+          curl -sfL "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" -o /tmp/lucli-linux
           LINUX_SHA=$(shasum -a 256 /tmp/lucli-linux | awk '{print $1}')
           require_sha "LINUX_SHA" "$LINUX_SHA"
           echo "linux_sha=$LINUX_SHA" >> "$GITHUB_OUTPUT"

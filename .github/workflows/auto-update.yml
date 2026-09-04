@@ -113,15 +113,14 @@ jobs:
           echo "current_lucli=$CURRENT_LUCLI" >> "$GITHUB_OUTPUT"
           echo "current_module=$CURRENT_MODULE" >> "$GITHUB_OUTPUT"
 
-          # PINNED to 0.3.17 (2026-06-19). LuCLI v0.3.18 shipped with no
-          # binaries (the cybersonic/LuCLI release has only RELEASE.md), so
-          # auto-deriving the latest tag made the SHA-compute step download a
-          # 404 and fail with exit 56 (blocking every wheels release bump).
-          # LuCLI is also mid-migration to the lucee org, which will change the
-          # download host/URLs. Revert to the `gh release view` auto-derivation
-          # once LuCLI publishes binaries again under its new home.
-          #   LATEST_LUCLI=$(gh release view --repo cybersonic/LuCLI --json tagName -q '.tagName' | sed 's/^v//')
-          LATEST_LUCLI="0.3.17"
+          # PINNED to 0.3.19 — a fork-built hotfix of 0.3.17 (upstream 0.3.18
+          # shipped no binaries, and upstream has since moved to the 0.6.x/0.7.x
+          # line). 0.3.19 carries the routeCommand() fix for aliased binaries
+          # (e.g. `wheels`) run from a directory containing a same-named entry,
+          # which upstream had not released at pin time. Revert to the `gh release
+          # view` auto-derivation once upstream publishes a fixed release.
+          #   LATEST_LUCLI=$(gh release view --repo bpamiri/LuCLI --json tagName -q '.tagName' | sed 's/^v//')
+          LATEST_LUCLI="0.3.19"
           validate_version "LATEST_LUCLI" "$LATEST_LUCLI"
           echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 
@@ -197,12 +196,12 @@ jobs:
             fi
           }
 
-          curl -sfL "https://github.com/cybersonic/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" -o /tmp/lucli-macos
+          curl -sfL "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" -o /tmp/lucli-macos
           MACOS_SHA=$(shasum -a 256 /tmp/lucli-macos | awk '{print $1}')
           require_sha "MACOS_SHA" "$MACOS_SHA"
           echo "macos_sha=$MACOS_SHA" >> "$GITHUB_OUTPUT"
 
-          curl -sfL "https://github.com/cybersonic/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" -o /tmp/lucli-linux
+          curl -sfL "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" -o /tmp/lucli-linux
           LINUX_SHA=$(shasum -a 256 /tmp/lucli-linux | awk '{print $1}')
           require_sha "LINUX_SHA" "$LINUX_SHA"
           echo "linux_sha=$LINUX_SHA" >> "$GITHUB_OUTPUT"

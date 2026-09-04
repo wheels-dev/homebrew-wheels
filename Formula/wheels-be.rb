@@ -2,7 +2,7 @@ class WheelsBe < Formula
   desc "CLI for the Wheels MVC framework — bleeding-edge channel (develop snapshots)"
   homepage "https://wheels.dev"
 
-  LUCLI_VERSION = "0.6.1"
+  LUCLI_VERSION = "0.6.2"
   MODULE_VERSION = "4.1.0-snapshot.2418"
   SQLITE_JDBC_VERSION = "3.49.1.0"
 
@@ -14,11 +14,11 @@ class WheelsBe < Formula
   license "Apache-2.0"
 
   if OS.mac?
-    url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
-    sha256 "5c53b100f420fa33c68459b38155d056b7d6ed98ff16ada59c910fe90fb3d5ec"
+    url "https://github.com/bpamiri/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
+    sha256 "7da2e2952eb3f9dcfe0163182871f70a0e7772bb1aee4be65340c46e65af704a"
   elsif OS.linux?
-    url "https://github.com/cybersonic/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-linux"
-    sha256 "5c53b100f420fa33c68459b38155d056b7d6ed98ff16ada59c910fe90fb3d5ec"
+    url "https://github.com/bpamiri/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-linux"
+    sha256 "7da2e2952eb3f9dcfe0163182871f70a0e7772bb1aee4be65340c46e65af704a"
   end
 
   resource "wheels_module" do
