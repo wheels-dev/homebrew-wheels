@@ -113,14 +113,14 @@ jobs:
           echo "current_lucli=$CURRENT_LUCLI" >> "$GITHUB_OUTPUT"
           echo "current_module=$CURRENT_MODULE" >> "$GITHUB_OUTPUT"
 
-          # PINNED to 0.3.19 — a fork-built hotfix of 0.3.17 (upstream 0.3.18
-          # shipped no binaries, and upstream has since moved to the 0.6.x/0.7.x
-          # line). 0.3.19 carries the routeCommand() fix for aliased binaries
-          # (e.g. `wheels`) run from a directory containing a same-named entry,
-          # which upstream had not released at pin time. Revert to the `gh release
-          # view` auto-derivation once upstream publishes a fixed release.
+          # PINNED to 0.6.2 — published (non-draft) bpamiri/LuCLI release that
+          # carries the routeCommand() fix for aliased binaries (e.g. `wheels`)
+          # run from a directory containing a same-named entry. The previous
+          # 0.3.19 pin became a draft after the Sep 4 bpamiri cutover, which
+          # 404'd `brew install wheels`. Keep a pin (do not auto-derive latest)
+          # so a newer 0.7.x line does not silently land on stable.
           #   LATEST_LUCLI=$(gh release view --repo bpamiri/LuCLI --json tagName -q '.tagName' | sed 's/^v//')
-          LATEST_LUCLI="0.3.19"
+          LATEST_LUCLI="0.6.2"
           validate_version "LATEST_LUCLI" "$LATEST_LUCLI"
           echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 

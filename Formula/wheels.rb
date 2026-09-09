@@ -2,7 +2,7 @@ class Wheels < Formula
   desc "CLI for the Wheels MVC framework — powered by LuCLI"
   homepage "https://wheels.dev"
 
-  LUCLI_VERSION = "0.3.19"
+  LUCLI_VERSION = "0.6.2"
   MODULE_VERSION = "4.0.6"
   SQLITE_JDBC_VERSION = "3.49.1.0"
 
@@ -15,10 +15,10 @@ class Wheels < Formula
 
   if OS.mac?
     url "https://github.com/bpamiri/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
-    sha256 "9e51d88d1ccc318a328733397929a71b93122739b3eb818366ddc816d85b721a"
+    sha256 "7da2e2952eb3f9dcfe0163182871f70a0e7772bb1aee4be65340c46e65af704a"
   elsif OS.linux?
     url "https://github.com/bpamiri/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-linux"
-    sha256 "9e51d88d1ccc318a328733397929a71b93122739b3eb818366ddc816d85b721a"
+    sha256 "7da2e2952eb3f9dcfe0163182871f70a0e7772bb1aee4be65340c46e65af704a"
   end
 
   resource "wheels_module" do
