@@ -371,9 +371,10 @@ jobs:
       #
       # Polls the PR's mergeStateStatus. CLEAN → squash-merge. BLOCKED or
       # UNSTABLE → required check still pending or transient instability,
-      # keep waiting. DIRTY → unexpected (concurrency group should prevent
-      # it); fail loudly so the issue is visible. BEHIND → upstream moved;
-      # update the branch.
+      # keep waiting. DIRTY → conflicts (concurrency should usually prevent
+      # this); close as superseded, delete the branch, and exit 0 so the
+      # next queued run can open a fresh PR from the updated base. BEHIND →
+      # upstream moved; update the branch.
       #
       # Caps total wait at 10 min so a stuck check can't block the queue
       # forever; the audit job normally completes in ~60s.
@@ -412,8 +413,11 @@ jobs:
                 echo "Waiting (${ELAPSED}s elapsed): mergeStateStatus=$STATE"
                 ;;
               DIRTY)
-                echo "::error::PR #$PR_NUMBER has conflicts (DIRTY). The serialization concurrency group should have prevented this — investigate."
-                exit 1
+                echo "::warning::PR #$PR_NUMBER has conflicts (DIRTY). Closing as superseded so the concurrency queue can proceed."
+                gh pr close "$PR_NUMBER" --delete-branch --comment \
+                  "Closing: this auto-update PR has merge conflicts (DIRTY) with master and was superseded. Concurrency should usually prevent this; the next queued run will open a fresh PR from the updated base if the bump is still needed." \
+                  || echo "::warning::Failed to close PR #$PR_NUMBER; exiting successfully so the concurrency queue is not blocked."
+                exit 0
                 ;;
               BEHIND)
                 echo "PR #$PR_NUMBER is BEHIND base; updating branch..."
