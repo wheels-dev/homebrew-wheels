@@ -31,6 +31,17 @@ class WheelsBe < Formula
     sha256 "260d6b12b719491ee134198167fd5fc7417b794d32648213ccccd5a78d20dace"
   end
 
+  # The offline documentation bundle: the prebuilt Astro/Starlight guides and
+  # API reference, built to be served from /wheels-docs/. Staged into
+  # share/wheels/docs and unpacked by the wrapper under ~/.wheels/docs/<version>/,
+  # which is where the framework looks for it, so the guides and API reference
+  # stay readable with no internet connection. Carries ONE docs version
+  # (~32 MB); the full multi-version site is ~1.3 GB.
+  resource "wheels_docs" do
+    url "https://github.com/wheels-dev/wheels-snapshots/releases/download/v#{MODULE_VERSION}/wheels-docs-#{MODULE_VERSION}.zip"
+    sha256 "c1e2ed94f22d1b6833f3d1dab310dbad6b193601f10a371e12522b0550455e98"
+  end
+
   # SQLite JDBC driver for the zero-config datasource emitted by `wheels new`.
   # Lucee 7's BundleProvider crashes when resolving sqlite-jdbc via the
   # bundleName hint, so wheels >=4.0 generates app.cfm without the hint and
@@ -71,6 +82,11 @@ class WheelsBe < Formula
       (share/"wheels/lib").install Dir["*.jar"]
     end
 
+    # Prebuilt docs bundle — unpacked by the wrapper on first run / upgrade.
+    resource("wheels_docs").stage do
+      (share/"wheels/docs").install Dir["*"]
+    end
+
     (share/"wheels").mkpath
     (share/"wheels/.module-version").write MODULE_VERSION
 
@@ -90,6 +106,8 @@ class WheelsBe < Formula
       WHEELS_VERSION_SRC="$BREW_PREFIX/share/wheels/.module-version"
       WHEELS_VERSION_DST="$HOME/.wheels/modules/wheels/.module-version"
       SQLITE_JDBC_SRC="$BREW_PREFIX/share/wheels/lib/sqlite-jdbc-#{SQLITE_JDBC_VERSION}.jar"
+      WHEELS_DOCS_SRC="$BREW_PREFIX/share/wheels/docs"
+      WHEELS_DOCS_DST="$HOME/.wheels/docs/#{MODULE_VERSION}"
 
       # Intercept --version and --help before LuCLI sees them. picocli treats
       # these as `usageHelp`/`versionHelp` flags and short-circuits during arg
@@ -540,6 +558,28 @@ class WheelsBe < Formula
         fi
       fi
 
+      # Local docs bundle. Version-gated like the module/framework sync above,
+      # so `brew upgrade` refreshes the offline docs. The framework resolves this
+      # directory from LUCLI_HOME + its own version.
+      if [ -d "$WHEELS_DOCS_SRC" ] && [ ! -f "$WHEELS_DOCS_DST/manifest.json" ]; then
+        echo "Installing offline docs for #{MODULE_VERSION}..." >&2
+        rm -rf "$WHEELS_DOCS_DST"
+        mkdir -p "$WHEELS_DOCS_DST"
+        cp -R "$WHEELS_DOCS_SRC/"* "$WHEELS_DOCS_DST/" 2>/dev/null || true
+      fi
+
+      # Mirror the bundle into the current app's webroot when we are in one.
+      # Required, not a convenience: the dev server's Lucee urlRewrite only
+      # routes extension-less paths to the front controller, so the bundle's
+      # extension-bearing asset URLs must be real files under the webroot for
+      # the container to serve them. Hardlinked so the shared cache is not
+      # duplicated per app. Only runs when cwd is a Wheels project.
+      if [ -f "./vendor/wheels/wheels.json" ] && [ -d "./public" ] && [ -d "$WHEELS_DOCS_DST" ]; then
+        rm -rf "./public/wheels-docs"
+        cp -R -l "$WHEELS_DOCS_DST" "./public/wheels-docs" 2>/dev/null \
+          || cp -R "$WHEELS_DOCS_DST" "./public/wheels-docs"
+      fi
+
       # Drop sqlite-jdbc into LuCLI's extracted Lucee lib/ext/ if missing. The
       # express dir only exists after first LuCLI run, so this is a no-op on
       # the very first invocation and self-heals on every run after.
@@ -566,6 +606,13 @@ class WheelsBe < Formula
       initialized in:
         ~/.wheels/modules/wheels/
         ~/.wheels/modules/wheels/vendor/wheels/
+
+      The prebuilt guides and API reference are installed offline under:
+        ~/.wheels/docs/#{MODULE_VERSION}/
+
+      and mirrored into an app's public/wheels-docs/ when you run `wheels` from
+      inside a project, so /wheels-docs/guides/ and /wheels-docs/api/ work with
+      no internet connection.
 
       The wrapper sets LUCLI_HOME=~/.wheels so all runtime state
       (modules, servers, deps, secrets) lives under that directory
