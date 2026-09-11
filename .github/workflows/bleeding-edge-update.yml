@@ -217,6 +217,19 @@ jobs:
           require_sha "CORE_SHA" "$CORE_SHA"
           echo "core_sha=$CORE_SHA" >> "$GITHUB_OUTPUT"
 
+          # Offline docs bundle — the prebuilt guides + API reference the
+          # framework serves from /wheels-docs/. Optional: an older release cut
+          # before the bundle existed has no asset, so fall back to the hash
+          # already in the formula rather than failing the bump.
+          if curl -sfL "https://github.com/wheels-dev/wheels-snapshots/releases/download/v${MODULE_VER}/wheels-docs-${MODULE_VER}.zip" -o /tmp/wheels-docs.zip; then
+            DOCS_SHA=$(shasum -a 256 /tmp/wheels-docs.zip | awk '{print $1}')
+            require_sha "DOCS_SHA" "$DOCS_SHA"
+          else
+            DOCS_SHA=$(grep -A2 'resource "wheels_docs" do' Formula/wheels-be.rb | grep 'sha256' | sed 's/.*"\(.*\)".*/\1/')
+            echo "::warning::no wheels-docs asset for ${MODULE_VER}; keeping existing sha256"
+          fi
+          echo "docs_sha=$DOCS_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Update formula
         if: steps.check.outputs.needs_update == 'true'
         env:
@@ -226,12 +239,13 @@ jobs:
           LINUX_SHA: ${{ steps.hashes.outputs.linux_sha }}
           MODULE_SHA: ${{ steps.hashes.outputs.module_sha }}
           CORE_SHA: ${{ steps.hashes.outputs.core_sha }}
+          DOCS_SHA: ${{ steps.hashes.outputs.docs_sha }}
         run: |
           set -euo pipefail
 
           # Belt-and-suspenders: reject empty inputs here too, in case upstream steps
           # are edited in the future and the earlier guards get weakened.
-          for var in LUCLI_VER MODULE_VER MACOS_SHA LINUX_SHA MODULE_SHA CORE_SHA; do
+          for var in LUCLI_VER MODULE_VER MACOS_SHA LINUX_SHA MODULE_SHA CORE_SHA DOCS_SHA; do
             val="${!var}"
             if [ -z "${val// }" ] || [ "$val" = "null" ]; then
               echo "::error::$var is empty or null; refusing to write formula." >&2
@@ -248,6 +262,7 @@ jobs:
           linux_sha = os.environ["LINUX_SHA"]
           module_sha = os.environ["MODULE_SHA"]
           core_sha = os.environ["CORE_SHA"]
+          docs_sha = os.environ["DOCS_SHA"]
 
           with open("Formula/wheels-be.rb", "r") as f:
               content = f.read()
@@ -263,6 +278,7 @@ jobs:
               (r'(-linux"\s*\n\s*sha256 ")[a-fA-F0-9]+(")', linux_sha),
               (r'(resource "wheels_module" do\s*\n\s*url "[^"]+"\s*\n\s*sha256 ")[a-fA-F0-9]+(")', module_sha),
               (r'(resource "wheels_core" do\s*\n\s*url "[^"]+"\s*\n\s*sha256 ")[^"]+(")', core_sha),
+              (r'(resource "wheels_docs" do\s*\n\s*url "[^"]+"\s*\n\s*sha256 ")[^"]+(")', docs_sha),
           ]
           for pattern, new_sha in replacements:
               new_content, n = re.subn(pattern, lambda m, s=new_sha: m.group(1) + s + m.group(2), content)
