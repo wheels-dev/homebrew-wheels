@@ -13,10 +13,16 @@ class WheelsBe < Formula
   version MODULE_VERSION
   license "Apache-2.0"
 
-  if OS.mac?
+  # on_macos / on_linux blocks, not a class-level `if OS.mac?`. Homebrew now
+  # evaluates a formula once per bottle platform (golden_gate, tahoe, ...),
+  # and a top-level conditional that leaves `url` undefined on the other
+  # branch fails that pass with "invalid syntax in tap" — which made
+  # `brew tap wheels-dev/wheels` refuse outright on current Homebrew.
+  on_macos do
     url "https://github.com/bpamiri/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
     sha256 "7da2e2952eb3f9dcfe0163182871f70a0e7772bb1aee4be65340c46e65af704a"
-  elsif OS.linux?
+  end
+  on_linux do
     url "https://github.com/bpamiri/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-linux"
     sha256 "7da2e2952eb3f9dcfe0163182871f70a0e7772bb1aee4be65340c46e65af704a"
   end
