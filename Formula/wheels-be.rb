@@ -195,7 +195,7 @@ class WheelsBe < Formula
             # `map`, not `mcp` — the runtime owns `mcp` (wheels mcp <name> runs a
             # module), so listing it here pointed users at a command that cannot
             # configure anything. See wheels-dev/wheels#3618.
-            echo "  map                 Write .mcp.json so AI assistants can query this app"
+            echo "  setup agents        Write .mcp.json / .opencode.json so AI assistants can query this app"
             echo "  version             Show Wheels CLI version"
             echo "  help                Show this help"
             echo ""
@@ -514,16 +514,15 @@ class WheelsBe < Formula
             exit 0
             ;;
           mcp)
-            echo "Usage: wheels mcp [setup|wheels]"
+            echo "Usage: wheels mcp wheels"
             echo ""
-            echo "Configure the Wheels MCP server for AI assistants."
+            echo "Run the stdio MCP server (used by AI IDEs, not invoked manually)."
             echo ""
-            echo "Actions:"
-            echo "  setup    Generate .mcp.json (Claude Code) and .opencode.json (OpenCode) in cwd"
-            echo "  wheels   Run the stdio MCP server (used by AI IDEs, not invoked manually)"
+            echo "To configure your project, run:"
+            echo "  wheels setup agents    # writes .mcp.json and .opencode.json"
             echo ""
-            echo "Examples:"
-            echo "  wheels mcp setup"
+            echo "Note: `wheels mcp <name>` is the runtime module runner, so"
+            echo "nothing may be spelled `wheels mcp setup`."
             exit 0
             ;;
           version)
