@@ -192,7 +192,10 @@ class WheelsBe < Formula
             echo "  deploy              Deploy your app (Kamal-compatible)"
             echo ""
             echo "Other:"
-            echo "  mcp                 Configure Wheels MCP server for AI assistants"
+            # `map`, not `mcp` — the runtime owns `mcp` (wheels mcp <name> runs a
+            # module), so listing it here pointed users at a command that cannot
+            # configure anything. See wheels-dev/wheels#3618.
+            echo "  map                 Write .mcp.json so AI assistants can query this app"
             echo "  version             Show Wheels CLI version"
             echo "  help                Show this help"
             echo ""
