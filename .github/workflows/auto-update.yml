@@ -178,8 +178,8 @@ jobs:
           fi
           echo "needs_update=$NEEDS_UPDATE" >> "$GITHUB_OUTPUT"
 
-          # verify_artifacts: a version bump already recomputes every hash, so it
-          # is only needed when the version is unchanged — the re-cut case. See
+          # verify_artifacts: a version bump already recomputes every hash, so the
+          # re-cut comparison is only needed when the version is unchanged. See
           # "Compare declared hashes" below.
           if [ "$NEEDS_UPDATE" = "false" ]; then
             echo "verify_artifacts=true" >> "$GITHUB_OUTPUT"
@@ -187,18 +187,82 @@ jobs:
             echo "verify_artifacts=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Order matters: the comparison below reads steps.hashes.outputs.*, so the
+      # hash computation must run FIRST. It is gated on needs_update OR
+      # verify_artifacts so a re-cut still gets its hashes computed.
+      - name: Compute SHA256 hashes
+        if: steps.check.outputs.needs_update == 'true' || steps.integrity.outputs.treat_as_update == 'true' || steps.check.outputs.verify_artifacts == 'true'
+        id: hashes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          MODULE_VER: ${{ steps.check.outputs.latest_module }}
+        run: |
+          set -euo pipefail
+
+          require_sha() {
+            local name="$1"
+            local val="$2"
+            if [ -z "$val" ] || [ "${#val}" -ne 64 ]; then
+              echo "::error::$name did not compute a valid sha256 ('$val')." >&2
+              exit 1
+            fi
+          }
+
+          # Release assets can lag the release record by a few seconds while an
+          # upload drains. Retry with backoff so a transient 404 or truncated
+          # body is not mistaken for a corrupt or missing artifact.
+          fetch_retry() {
+            local url="$1" out="$2" attempt backoff
+            for attempt in 1 2 3 4 5; do
+              if curl -sfL "$url" -o "$out"; then
+                return 0
+              fi
+              backoff=$((attempt * 10))
+              echo "Attempt ${attempt}/5: no asset at ${url}; retrying in ${backoff}s..." >&2
+              sleep "$backoff"
+            done
+            echo "::error::Could not download ${url} after 5 attempts." >&2
+            return 1
+          }
+
+          fetch_retry "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" /tmp/lucli-macos
+          MACOS_SHA=$(shasum -a 256 /tmp/lucli-macos | awk '{print $1}')
+          require_sha "MACOS_SHA" "$MACOS_SHA"
+          echo "macos_sha=$MACOS_SHA" >> "$GITHUB_OUTPUT"
+
+          fetch_retry "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" /tmp/lucli-linux
+          LINUX_SHA=$(shasum -a 256 /tmp/lucli-linux | awk '{print $1}')
+          require_sha "LINUX_SHA" "$LINUX_SHA"
+          echo "linux_sha=$LINUX_SHA" >> "$GITHUB_OUTPUT"
+
+          # Module tarball is required now that MODULE_VERSION validation is strict —
+          # fail the workflow if the advertised release doesn't actually have the asset.
+          fetch_retry "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-module-${MODULE_VER}.tar.gz" /tmp/wheels-module.tar.gz
+          MODULE_SHA=$(shasum -a 256 /tmp/wheels-module.tar.gz | awk '{print $1}')
+          require_sha "MODULE_SHA" "$MODULE_SHA"
+          echo "module_sha=$MODULE_SHA" >> "$GITHUB_OUTPUT"
+
+          # Framework-source zip — required so `wheels new` can boot the scaffold.
+          # See wheels-dev/wheels PR 2294 for the release-workflow fix that
+          # started publishing this artifact on snapshots.
+          fetch_retry "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-core-${MODULE_VER}.zip" /tmp/wheels-core.zip
+          CORE_SHA=$(shasum -a 256 /tmp/wheels-core.zip | awk '{print $1}')
+          require_sha "CORE_SHA" "$CORE_SHA"
+          echo "core_sha=$CORE_SHA" >> "$GITHUB_OUTPUT"
+
+      # Version-gating alone cannot see a re-cut: when a release is rebuilt
+      # under the same version number the version strings still match, so the
+      # check above concludes "no update" and the formula keeps hashes for
+      # artifacts that no longer exist — `brew install wheels` then fails its
+      # checksum. That is exactly what happened to 4.1.0 on 2026-09-17 (the GA
+      # was rebuilt to roll in the migrator logging fix), and the stable
+      # workflow no-op'd in 12s on every dispatch.
+      #
+      # Only the stable/GA channel stores hashes in the formula; wheels-be.rb
+      # is owned by bleeding-edge-update.yml, so hash repair is not attempted
+      # for bleeding-edge.
       - name: Compare declared hashes
-        # Version-gating alone cannot see a re-cut: when a release is rebuilt
-        # under the same version number the version strings still match, so the
-        # check above concludes "no update" and the formula keeps hashes for
-        # artifacts that no longer exist — `brew install wheels` then fails its
-        # checksum. That is exactly what happened to 4.1.0 on 2026-09-17 (the GA
-        # was rebuilt to roll in the migrator logging fix), and the stable
-        # workflow no-op'd in 12s on every dispatch.
-        #
-        # Only the stable/GA channel stores hashes in the formula; wheels-be.rb
-        # is owned by bleeding-edge-update.yml, so hash repair is not attempted
-        # for bleeding-edge.
         if: steps.check.outputs.verify_artifacts == 'true'
         id: integrity
         env:
@@ -264,77 +328,22 @@ jobs:
 
           if [ -n "$CHANGED" ]; then
             echo "Artifacts for ${MODULE_VER} have moved (re-cut?); repairing hashes for: ${CHANGED}"
+            # NB: needs_update CANNOT be overwritten here. GitHub keeps the first
+            # value written for an output key, so a second write is ignored (a
+            # real run confirmed downstream steps still saw needs_update=false).
+            # Downstream steps therefore gate on treat_as_update instead.
             echo "hash_repair=true" >> "$GITHUB_OUTPUT"
             echo "changed_resources=$CHANGED" >> "$GITHUB_OUTPUT"
-            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+            echo "treat_as_update=true" >> "$GITHUB_OUTPUT"
           else
             echo "Declared hashes already match the upstream ${MODULE_VER} artifacts; nothing to do."
             echo "hash_repair=false" >> "$GITHUB_OUTPUT"
             echo "changed_resources=" >> "$GITHUB_OUTPUT"
+            echo "treat_as_update=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Compute SHA256 hashes
-        id: hashes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
-          MODULE_VER: ${{ steps.check.outputs.latest_module }}
-        run: |
-          set -euo pipefail
-
-          require_sha() {
-            local name="$1"
-            local val="$2"
-            if [ -z "$val" ] || [ "${#val}" -ne 64 ]; then
-              echo "::error::$name did not compute a valid sha256 ('$val')." >&2
-              exit 1
-            fi
-          }
-
-          # Release assets can lag the release record by a few seconds while an
-          # upload drains. Retry with backoff so a transient 404 or truncated
-          # body is not mistaken for a corrupt or missing artifact.
-          fetch_retry() {
-            local url="$1" out="$2" attempt backoff
-            for attempt in 1 2 3 4 5; do
-              if curl -sfL "$url" -o "$out"; then
-                return 0
-              fi
-              backoff=$((attempt * 10))
-              echo "Attempt ${attempt}/5: no asset at ${url}; retrying in ${backoff}s..." >&2
-              sleep "$backoff"
-            done
-            echo "::error::Could not download ${url} after 5 attempts." >&2
-            return 1
-          }
-
-          fetch_retry "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" /tmp/lucli-macos
-          MACOS_SHA=$(shasum -a 256 /tmp/lucli-macos | awk '{print $1}')
-          require_sha "MACOS_SHA" "$MACOS_SHA"
-          echo "macos_sha=$MACOS_SHA" >> "$GITHUB_OUTPUT"
-
-          fetch_retry "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" /tmp/lucli-linux
-          LINUX_SHA=$(shasum -a 256 /tmp/lucli-linux | awk '{print $1}')
-          require_sha "LINUX_SHA" "$LINUX_SHA"
-          echo "linux_sha=$LINUX_SHA" >> "$GITHUB_OUTPUT"
-
-          # Module tarball is required now that MODULE_VERSION validation is strict —
-          # fail the workflow if the advertised release doesn't actually have the asset.
-          fetch_retry "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-module-${MODULE_VER}.tar.gz" /tmp/wheels-module.tar.gz
-          MODULE_SHA=$(shasum -a 256 /tmp/wheels-module.tar.gz | awk '{print $1}')
-          require_sha "MODULE_SHA" "$MODULE_SHA"
-          echo "module_sha=$MODULE_SHA" >> "$GITHUB_OUTPUT"
-
-          # Framework-source zip — required so `wheels new` can boot the scaffold.
-          # See wheels-dev/wheels PR 2294 for the release-workflow fix that
-          # started publishing this artifact on snapshots.
-          fetch_retry "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-core-${MODULE_VER}.zip" /tmp/wheels-core.zip
-          CORE_SHA=$(shasum -a 256 /tmp/wheels-core.zip | awk '{print $1}')
-          require_sha "CORE_SHA" "$CORE_SHA"
-          echo "core_sha=$CORE_SHA" >> "$GITHUB_OUTPUT"
-
       - name: Update formula
-        if: steps.check.outputs.needs_update == 'true'
+        if: steps.check.outputs.needs_update == 'true' || steps.integrity.outputs.treat_as_update == 'true'
         env:
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
@@ -391,7 +400,7 @@ jobs:
           PYEOF
 
       - name: Verify formula integrity
-        if: steps.check.outputs.needs_update == 'true'
+        if: steps.check.outputs.needs_update == 'true' || steps.integrity.outputs.treat_as_update == 'true'
         run: |
           set -euo pipefail
 
@@ -419,7 +428,7 @@ jobs:
           echo "Formula verified: LUCLI_VERSION=$WROTE_LUCLI, MODULE_VERSION=$WROTE_MODULE"
 
       - name: Smoke test formula (brew audit + fetch)
-        if: steps.check.outputs.needs_update == 'true'
+        if: steps.check.outputs.needs_update == 'true' || steps.integrity.outputs.treat_as_update == 'true'
         run: |
           set -euo pipefail
 
@@ -442,7 +451,7 @@ jobs:
           brew fetch --retry wheels-dev/wheels/wheels
 
       - name: Create PR
-        if: steps.check.outputs.needs_update == 'true'
+        if: steps.check.outputs.needs_update == 'true' || steps.integrity.outputs.treat_as_update == 'true'
         env:
           # Use the PAT (when set) so the resulting `push origin <branch>` and
           # the PR creation event DO trigger the on:pull_request audit workflow.
@@ -512,7 +521,7 @@ jobs:
       # Caps total wait at 10 min so a stuck check can't block the queue
       # forever; the audit job normally completes in ~60s.
       - name: Wait for checks and merge
-        if: steps.check.outputs.needs_update == 'true'
+        if: steps.check.outputs.needs_update == 'true' || steps.integrity.outputs.treat_as_update == 'true'
         env:
           GH_TOKEN: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
