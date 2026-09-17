@@ -29,12 +29,12 @@ class Wheels < Formula
 
   resource "wheels_module" do
     url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-module-#{MODULE_VERSION}.tar.gz"
-    sha256 "f19cb263377706d486330accfc8d678791db76b1c435125ab75ebd971109526f"
+    sha256 "36e986f225ff26b34bf125b1894cf00b4c2479689e2c8fd7291a896bae4bc524"
   end
 
   resource "wheels_core" do
     url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-core-#{MODULE_VERSION}.zip"
-    sha256 "a725d723ca90062e4f5c75f39c20b55d2aa5f61bab2bbfce2016d150fecad816"
+    sha256 "b44daf7a23248a15cb67f7260cb1066bfde2eebfa312d97df9a6ab796f241957"
   end
 
   # SQLite JDBC driver for the zero-config datasource emitted by `wheels new`.
