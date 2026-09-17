@@ -91,6 +91,7 @@ jobs:
               echo "current_module=skip" >> "$GITHUB_OUTPUT"
               echo "latest_lucli=skip" >> "$GITHUB_OUTPUT"
               echo "latest_module=skip" >> "$GITHUB_OUTPUT"
+              echo "verify_artifacts=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           fi
@@ -177,8 +178,102 @@ jobs:
           fi
           echo "needs_update=$NEEDS_UPDATE" >> "$GITHUB_OUTPUT"
 
+          # verify_artifacts: a version bump already recomputes every hash, so it
+          # is only needed when the version is unchanged — the re-cut case. See
+          # "Compare declared hashes" below.
+          if [ "$NEEDS_UPDATE" = "false" ]; then
+            echo "verify_artifacts=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "verify_artifacts=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compare declared hashes
+        # Version-gating alone cannot see a re-cut: when a release is rebuilt
+        # under the same version number the version strings still match, so the
+        # check above concludes "no update" and the formula keeps hashes for
+        # artifacts that no longer exist — `brew install wheels` then fails its
+        # checksum. That is exactly what happened to 4.1.0 on 2026-09-17 (the GA
+        # was rebuilt to roll in the migrator logging fix), and the stable
+        # workflow no-op'd in 12s on every dispatch.
+        #
+        # Only the stable/GA channel stores hashes in the formula; wheels-be.rb
+        # is owned by bleeding-edge-update.yml, so hash repair is not attempted
+        # for bleeding-edge.
+        if: steps.check.outputs.verify_artifacts == 'true'
+        id: integrity
+        env:
+          CHANNEL: ${{ github.event.client_payload.channel }}
+          MODULE_VER: ${{ steps.check.outputs.latest_module }}
+          LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          MACOS_SHA: ${{ steps.hashes.outputs.macos_sha }}
+          LINUX_SHA: ${{ steps.hashes.outputs.linux_sha }}
+          MODULE_SHA: ${{ steps.hashes.outputs.module_sha }}
+          CORE_SHA: ${{ steps.hashes.outputs.core_sha }}
+        run: |
+          set -euo pipefail
+
+          # Never repair hashes for a non-stable channel.
+          SNIFFED="${CHANNEL:-}"
+          if [ -z "$SNIFFED" ] && echo "${MODULE_VER}" | grep -qiE '\-snapshot[\.\+]'; then
+            SNIFFED="bleeding-edge"
+          fi
+          if [ "${SNIFFED}" = "bleeding-edge" ] || [ "${SNIFFED}" = "release-candidate" ]; then
+            echo "Non-stable channel ('${SNIFFED}') — hash repair not applicable."
+            echo "hash_repair=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Prints the sha256 the formula currently declares for a resource block,
+          # or an empty string if the block is missing/unreadable. Uses awk over
+          # the resource block so it stays correct if the blocks are reordered.
+          formula_sha() {
+            local resource="$1"
+            awk -v want="$resource" '
+              index($0, "resource \"" want "\" do") { inblock = 1 }
+              inblock && /sha256 "/ {
+                line = $0
+                sub(/.*sha256 "/, "", line)
+                sub(/".*/, "", line)
+                print line
+                exit
+              }
+            ' Formula/wheels.rb
+          }
+
+          CHANGED=""
+          add_changed() {
+            if [ -z "$CHANGED" ]; then CHANGED="$1"; else CHANGED="$CHANGED,$1"; fi
+          }
+
+          # Only the module/core resources are checked. The LuCLI binaries are
+          # pinned and immutable per version, so a re-cut never moves them, and
+          # skipping them keeps the comparison tight.
+          for pair in "wheels_module:${MODULE_SHA}" "wheels_core:${CORE_SHA}"; do
+            resource="${pair%%:*}"
+            computed="${pair#*:}"
+            declared="$(formula_sha "$resource")"
+            if [ -z "$declared" ]; then
+              echo "::warning::Could not read the declared sha256 for ${resource}; skipping comparison."
+              continue
+            fi
+            if [ "$declared" != "$computed" ]; then
+              echo "Hash mismatch for ${resource}: declared ${declared:0:12}... != upstream ${computed:0:12}..."
+              add_changed "$resource"
+            fi
+          done
+
+          if [ -n "$CHANGED" ]; then
+            echo "Artifacts for ${MODULE_VER} have moved (re-cut?); repairing hashes for: ${CHANGED}"
+            echo "hash_repair=true" >> "$GITHUB_OUTPUT"
+            echo "changed_resources=$CHANGED" >> "$GITHUB_OUTPUT"
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Declared hashes already match the upstream ${MODULE_VER} artifacts; nothing to do."
+            echo "hash_repair=false" >> "$GITHUB_OUTPUT"
+            echo "changed_resources=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Compute SHA256 hashes
-        if: steps.check.outputs.needs_update == 'true'
         id: hashes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -196,19 +291,36 @@ jobs:
             fi
           }
 
-          curl -sfL "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" -o /tmp/lucli-macos
+          # Release assets can lag the release record by a few seconds while an
+          # upload drains. Retry with backoff so a transient 404 or truncated
+          # body is not mistaken for a corrupt or missing artifact.
+          fetch_retry() {
+            local url="$1" out="$2" attempt backoff
+            for attempt in 1 2 3 4 5; do
+              if curl -sfL "$url" -o "$out"; then
+                return 0
+              fi
+              backoff=$((attempt * 10))
+              echo "Attempt ${attempt}/5: no asset at ${url}; retrying in ${backoff}s..." >&2
+              sleep "$backoff"
+            done
+            echo "::error::Could not download ${url} after 5 attempts." >&2
+            return 1
+          }
+
+          fetch_retry "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" /tmp/lucli-macos
           MACOS_SHA=$(shasum -a 256 /tmp/lucli-macos | awk '{print $1}')
           require_sha "MACOS_SHA" "$MACOS_SHA"
           echo "macos_sha=$MACOS_SHA" >> "$GITHUB_OUTPUT"
 
-          curl -sfL "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" -o /tmp/lucli-linux
+          fetch_retry "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" /tmp/lucli-linux
           LINUX_SHA=$(shasum -a 256 /tmp/lucli-linux | awk '{print $1}')
           require_sha "LINUX_SHA" "$LINUX_SHA"
           echo "linux_sha=$LINUX_SHA" >> "$GITHUB_OUTPUT"
 
           # Module tarball is required now that MODULE_VERSION validation is strict —
           # fail the workflow if the advertised release doesn't actually have the asset.
-          curl -sfL "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-module-${MODULE_VER}.tar.gz" -o /tmp/wheels-module.tar.gz
+          fetch_retry "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-module-${MODULE_VER}.tar.gz" /tmp/wheels-module.tar.gz
           MODULE_SHA=$(shasum -a 256 /tmp/wheels-module.tar.gz | awk '{print $1}')
           require_sha "MODULE_SHA" "$MODULE_SHA"
           echo "module_sha=$MODULE_SHA" >> "$GITHUB_OUTPUT"
@@ -216,7 +328,7 @@ jobs:
           # Framework-source zip — required so `wheels new` can boot the scaffold.
           # See wheels-dev/wheels PR 2294 for the release-workflow fix that
           # started publishing this artifact on snapshots.
-          curl -sfL "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-core-${MODULE_VER}.zip" -o /tmp/wheels-core.zip
+          fetch_retry "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-core-${MODULE_VER}.zip" /tmp/wheels-core.zip
           CORE_SHA=$(shasum -a 256 /tmp/wheels-core.zip | awk '{print $1}')
           require_sha "CORE_SHA" "$CORE_SHA"
           echo "core_sha=$CORE_SHA" >> "$GITHUB_OUTPUT"
@@ -340,27 +452,47 @@ jobs:
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
           CURRENT_LUCLI: ${{ steps.check.outputs.current_lucli }}
           CURRENT_MODULE: ${{ steps.check.outputs.current_module }}
+          HASH_REPAIR: ${{ steps.integrity.outputs.hash_repair }}
+          CHANGED_RESOURCES: ${{ steps.integrity.outputs.changed_resources }}
         run: |
           set -euo pipefail
 
           # Sanitize version strings for branch names (+ is legal but noisy in refs).
           sanitize() { echo "$1" | tr '+' '-'; }
-          BRANCH="auto-update/lucli-$(sanitize "$LUCLI_VER")-module-$(sanitize "$MODULE_VER")"
+
+          if [ "${HASH_REPAIR}" = "true" ]; then
+            TITLE="chore: repair checksums for module ${MODULE_VER}"
+            BODY="Upstream re-cut the ${MODULE_VER} release under the same version
+          number, so the artifacts moved while the version stayed the same. The
+          declared sha256 values no longer matched, which makes \`brew install
+          wheels\` fail its checksum check.
+
+          Repaired: ${CHANGED_RESOURCES}
+          Module: ${MODULE_VER} (unchanged)
+          LuCLI: ${LUCLI_VER} (unchanged)
+
+          Version-gating alone cannot detect this: the strings still match, so
+          the usual update check sees nothing to do."
+            # A distinct branch suffix, otherwise this collides with the branch
+            # named for the version bump (which shares the same version strings).
+            BRANCH="auto-update/lucli-$(sanitize "$LUCLI_VER")-module-$(sanitize "$MODULE_VER")-hashrepair"
+          else
+            TITLE="chore: update to LuCLI ${LUCLI_VER}, module ${MODULE_VER}"
+            BODY="Auto-update from upstream releases.
+
+          - LuCLI: ${CURRENT_LUCLI} -> ${LUCLI_VER}
+          - Module: ${CURRENT_MODULE} -> ${MODULE_VER}"
+            BRANCH="auto-update/lucli-$(sanitize "$LUCLI_VER")-module-$(sanitize "$MODULE_VER")"
+          fi
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           git add Formula/wheels.rb
-          git commit -m "chore: update to LuCLI ${LUCLI_VER}, module ${MODULE_VER}"
+          git commit -m "$TITLE"
           git push origin "$BRANCH"
 
-          gh pr create \
-            --title "chore: update to LuCLI ${LUCLI_VER}, module ${MODULE_VER}" \
-            --body "Auto-update from upstream releases.
-
-          - LuCLI: ${CURRENT_LUCLI} -> ${LUCLI_VER}
-          - Module: ${CURRENT_MODULE} -> ${MODULE_VER}" \
-            --label "auto-update"
+          gh pr create --title "$TITLE" --body "$BODY" --label "auto-update"
 
       # Synchronous wait-and-merge. Replaces a previous `gh pr merge --auto
       # --squash` invocation that scheduled the merge for after-checks-pass
@@ -385,11 +517,17 @@ jobs:
           GH_TOKEN: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
+          HASH_REPAIR: ${{ steps.integrity.outputs.hash_repair }}
         run: |
           set -euo pipefail
 
           sanitize() { echo "$1" | tr '+' '-'; }
           BRANCH="auto-update/lucli-$(sanitize "$LUCLI_VER")-module-$(sanitize "$MODULE_VER")"
+          # The hash-repair PR uses a distinct branch so it cannot collide with
+          # the version-bump branch, which shares the same version strings.
+          if [ "${HASH_REPAIR}" = "true" ]; then
+            BRANCH="${BRANCH}-hashrepair"
+          fi
 
           PR_NUMBER=$(gh pr list --head "$BRANCH" --json number -q '.[0].number // ""')
           if [ -z "$PR_NUMBER" ]; then
