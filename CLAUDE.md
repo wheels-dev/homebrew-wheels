@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Homebrew tap for the Wheels CLI. Installs LuCLI binary (from cybersonic/LuCLI releases) as `wheels`.
+Homebrew tap for the Wheels CLI. Installs the reviewed LuCLI runtime selected by wheels-dev/wheels `tools/lucli.json` as `wheels`.
 
 ## Formula Structure
 
@@ -20,4 +20,4 @@ brew audit --strict Formula/wheels.rb                 # lint
 
 ## Auto-Update
 
-`.github/workflows/auto-update.yml` polls cybersonic/LuCLI and wheels-dev/wheels releases daily. If either has a new version, it updates the formula and auto-merges.
+`.github/workflows/auto-update.yml` reads the shared Wheels runtime pin and checks wheels-dev/wheels releases daily. It generates the formula URLs/checksums from that pin, rather than selecting the latest LuCLI release, then opens and auto-merges an update PR.

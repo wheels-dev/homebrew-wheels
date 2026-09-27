@@ -114,15 +114,14 @@ jobs:
           echo "current_lucli=$CURRENT_LUCLI" >> "$GITHUB_OUTPUT"
           echo "current_module=$CURRENT_MODULE" >> "$GITHUB_OUTPUT"
 
-          # PINNED to 0.6.2 — published (non-draft) bpamiri/LuCLI release that
-          # carries the routeCommand() fix for aliased binaries (e.g. `wheels`)
-          # run from a directory containing a same-named entry. The previous
-          # 0.3.19 pin became a draft after the Sep 4 bpamiri cutover, which
-          # 404'd `brew install wheels`. Keep a pin (do not auto-derive latest)
-          # so a newer 0.7.x line does not silently land on stable.
-          #   LATEST_LUCLI=$(gh release view --repo bpamiri/LuCLI --json tagName -q '.tagName' | sed 's/^v//')
-          LATEST_LUCLI="0.6.2"
-          validate_version "LATEST_LUCLI" "$LATEST_LUCLI"
+          # Shared with Wheels CI and Linux packages; never select runtime latest.
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/wheels-dev/wheels/develop/tools/lucli.json \
+            --output /tmp/wheels-lucli.json
+          LUCLI_REPO=$(jq -er '.LUCLI_REPO | select(test("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))' /tmp/wheels-lucli.json)
+          LATEST_LUCLI=$(jq -er '.LUCLI_VERSION | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?$"))' /tmp/wheels-lucli.json)
+          CURRENT_LUCLI_REPO=$(sed -n 's/^  LUCLI_REPO = "\(.*\)"/\1/p' Formula/wheels.rb)
+          echo "lucli_repo=$LUCLI_REPO" >> "$GITHUB_OUTPUT"
           echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 
           # Module version resolution.
@@ -168,7 +167,7 @@ jobs:
           echo "latest_module=$LATEST_MODULE" >> "$GITHUB_OUTPUT"
 
           NEEDS_UPDATE="false"
-          if [ "$CURRENT_LUCLI" != "$LATEST_LUCLI" ]; then
+          if [ "$CURRENT_LUCLI" != "$LATEST_LUCLI" ] || [ "$CURRENT_LUCLI_REPO" != "$LUCLI_REPO" ]; then
             NEEDS_UPDATE="true"
             echo "LuCLI update: $CURRENT_LUCLI -> $LATEST_LUCLI"
           fi
@@ -196,6 +195,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          LUCLI_REPO: ${{ steps.check.outputs.lucli_repo }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
         run: |
           set -euo pipefail
@@ -226,15 +226,30 @@ jobs:
             return 1
           }
 
-          fetch_retry "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" /tmp/lucli-macos
+          fetch_retry "https://github.com/${LUCLI_REPO}/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" /tmp/lucli-macos
           MACOS_SHA=$(shasum -a 256 /tmp/lucli-macos | awk '{print $1}')
           require_sha "MACOS_SHA" "$MACOS_SHA"
           echo "macos_sha=$MACOS_SHA" >> "$GITHUB_OUTPUT"
 
-          fetch_retry "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" /tmp/lucli-linux
+          fetch_retry "https://github.com/${LUCLI_REPO}/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" /tmp/lucli-linux
           LINUX_SHA=$(shasum -a 256 /tmp/lucli-linux | awk '{print $1}')
           require_sha "LINUX_SHA" "$LINUX_SHA"
           echo "linux_sha=$LINUX_SHA" >> "$GITHUB_OUTPUT"
+
+          # The shared pin carries the published SHA-256 of each launcher. A
+          # download that does not match it (a swapped or re-uploaded asset)
+          # must not reach the formula.
+          for os_name in macos linux; do
+            PINNED=$(jq -er --arg k "$os_name" '.LUCLI_SHA256[$k] | select(test("^[0-9a-f]{64}$"))' /tmp/wheels-lucli.json) || {
+              echo "::error::tools/lucli.json has no valid LUCLI_SHA256.${os_name}; refusing to update the formula." >&2
+              exit 1
+            }
+            GOT_VAR="$(echo "$os_name" | tr '[:lower:]' '[:upper:]')_SHA"
+            if [ "${!GOT_VAR}" != "$PINNED" ]; then
+              echo "::error::LuCLI ${LUCLI_VER} ${os_name} launcher is ${!GOT_VAR}, but the pin says ${PINNED}; refusing to update the formula." >&2
+              exit 1
+            fi
+          done
 
           # Module tarball is required now that MODULE_VERSION validation is strict —
           # fail the workflow if the advertised release doesn't actually have the asset.
@@ -269,6 +284,7 @@ jobs:
           CHANNEL: ${{ github.event.client_payload.channel }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          LUCLI_REPO: ${{ steps.check.outputs.lucli_repo }}
           MACOS_SHA: ${{ steps.hashes.outputs.macos_sha }}
           LINUX_SHA: ${{ steps.hashes.outputs.linux_sha }}
           MODULE_SHA: ${{ steps.hashes.outputs.module_sha }}
@@ -346,6 +362,7 @@ jobs:
         if: steps.check.outputs.needs_update == 'true' || steps.integrity.outputs.treat_as_update == 'true'
         env:
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          LUCLI_REPO: ${{ steps.check.outputs.lucli_repo }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
           MACOS_SHA: ${{ steps.hashes.outputs.macos_sha }}
           LINUX_SHA: ${{ steps.hashes.outputs.linux_sha }}
@@ -364,6 +381,24 @@ jobs:
             fi
           done
 
+          # brew compares `version MODULE_VERSION` plus `revision`. A module bump
+          # starts a new version, so any revision is dropped; an update with the
+          # same module (a runtime change or a hash repair) must bump the revision,
+          # or `brew upgrade` never offers it.
+          OLD_MODULE=$(sed -n 's/^  MODULE_VERSION = "\(.*\)"$/\1/p' Formula/wheels.rb)
+          OLD_REVISION=$(sed -n 's/^  revision \([0-9][0-9]*\)$/\1/p' Formula/wheels.rb)
+          if [ "$OLD_MODULE" != "$MODULE_VER" ]; then
+            sed -i '' '/^  revision [0-9][0-9]*$/d' Formula/wheels.rb
+          else
+            NEW_REVISION=$(( ${OLD_REVISION:-0} + 1 ))
+            if [ -n "$OLD_REVISION" ]; then
+              sed -i '' "s/^  revision [0-9][0-9]*$/  revision ${NEW_REVISION}/" Formula/wheels.rb
+            else
+              perl -pi -e 's/^(  version MODULE_VERSION)$/$1\n  revision '"${NEW_REVISION}"'/' Formula/wheels.rb
+            fi
+          fi
+
+          sed -i '' "s|LUCLI_REPO = \".*\"|LUCLI_REPO = \"${LUCLI_REPO}\"|" Formula/wheels.rb
           sed -i '' "s/LUCLI_VERSION = \".*\"/LUCLI_VERSION = \"${LUCLI_VER}\"/" Formula/wheels.rb
           sed -i '' "s/MODULE_VERSION = \".*\"/MODULE_VERSION = \"${MODULE_VER}\"/" Formula/wheels.rb
 
@@ -458,6 +493,7 @@ jobs:
           # See checkout step at top of job for full rationale.
           GH_TOKEN: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          LUCLI_REPO: ${{ steps.check.outputs.lucli_repo }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
           CURRENT_LUCLI: ${{ steps.check.outputs.current_lucli }}
           CURRENT_MODULE: ${{ steps.check.outputs.current_module }}
@@ -525,6 +561,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          LUCLI_REPO: ${{ steps.check.outputs.lucli_repo }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
           HASH_REPAIR: ${{ steps.integrity.outputs.hash_repair }}
         run: |

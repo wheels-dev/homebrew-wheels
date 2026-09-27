@@ -2,7 +2,8 @@ class Wheels < Formula
   desc "CLI for the Wheels MVC framework — powered by LuCLI"
   homepage "https://wheels.dev"
 
-  LUCLI_VERSION = "0.6.2"
+  LUCLI_REPO = "wheels-dev/LuCLI"
+  LUCLI_VERSION = "0.6.2.1"
   MODULE_VERSION = "4.1.0"
   SQLITE_JDBC_VERSION = "3.49.1.0"
 
@@ -11,6 +12,7 @@ class Wheels < Formula
   # upgrade check must compare MODULE_VERSION — otherwise `brew upgrade` is
   # a silent no-op for module-only bumps (the common case).
   version MODULE_VERSION
+  revision 1
   license "Apache-2.0"
 
   # on_macos / on_linux blocks, not a class-level `if OS.mac?`. Homebrew now
@@ -19,12 +21,12 @@ class Wheels < Formula
   # branch fails that pass with "invalid syntax in tap" — which made
   # `brew tap wheels-dev/wheels` refuse outright on current Homebrew.
   on_macos do
-    url "https://github.com/bpamiri/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
-    sha256 "7da2e2952eb3f9dcfe0163182871f70a0e7772bb1aee4be65340c46e65af704a"
+    url "https://github.com/#{LUCLI_REPO}/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
+    sha256 "edcc131e2101c2e5ec08a235f6ac16e5bbdcd8e3f3ea167cb115704f515a0844"
   end
   on_linux do
-    url "https://github.com/bpamiri/LuCLI/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-linux"
-    sha256 "7da2e2952eb3f9dcfe0163182871f70a0e7772bb1aee4be65340c46e65af704a"
+    url "https://github.com/#{LUCLI_REPO}/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-linux"
+    sha256 "edcc131e2101c2e5ec08a235f6ac16e5bbdcd8e3f3ea167cb115704f515a0844"
   end
 
   resource "wheels_module" do
