@@ -107,13 +107,14 @@ jobs:
           echo "current_lucli=$CURRENT_LUCLI" >> "$GITHUB_OUTPUT"
           echo "current_module=$CURRENT_MODULE" >> "$GITHUB_OUTPUT"
 
-          # PINNED to 0.6.2 — a fork-built hotfix of 0.6.1 carrying the
-          # routeCommand() fix for aliased binaries (e.g. `wheels`) run from a
-          # directory containing a same-named entry. Revert to auto-derivation
-          # once upstream releases the fix (cybersonic/LuCLI#123):
-          #   LATEST_LUCLI=$(gh release view --repo cybersonic/LuCLI --json tagName -q '.tagName' | sed 's/^v//')
-          LATEST_LUCLI="0.6.2"
-          validate_version "LATEST_LUCLI" "$LATEST_LUCLI"
+          # Shared with Wheels CI and Linux packages; never select runtime latest.
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/wheels-dev/wheels/develop/tools/lucli.json \
+            --output /tmp/wheels-lucli.json
+          LUCLI_REPO=$(jq -er '.LUCLI_REPO | select(test("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))' /tmp/wheels-lucli.json)
+          LATEST_LUCLI=$(jq -er '.LUCLI_VERSION | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?$"))' /tmp/wheels-lucli.json)
+          CURRENT_LUCLI_REPO=$(sed -n 's/^  LUCLI_REPO = "\(.*\)"/\1/p' Formula/wheels-be.rb)
+          echo "lucli_repo=$LUCLI_REPO" >> "$GITHUB_OUTPUT"
           echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 
           # Module version resolution.
@@ -163,7 +164,7 @@ jobs:
           echo "latest_module=$LATEST_MODULE" >> "$GITHUB_OUTPUT"
 
           NEEDS_UPDATE="false"
-          if [ "$CURRENT_LUCLI" != "$LATEST_LUCLI" ]; then
+          if [ "$CURRENT_LUCLI" != "$LATEST_LUCLI" ] || [ "$CURRENT_LUCLI_REPO" != "$LUCLI_REPO" ]; then
             NEEDS_UPDATE="true"
             echo "LuCLI update: $CURRENT_LUCLI -> $LATEST_LUCLI"
           fi
@@ -179,6 +180,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          LUCLI_REPO: ${{ steps.check.outputs.lucli_repo }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
         run: |
           set -euo pipefail
@@ -192,12 +194,12 @@ jobs:
             fi
           }
 
-          curl -sfL "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" -o /tmp/lucli-macos
+          curl -sfL "https://github.com/${LUCLI_REPO}/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-macos" -o /tmp/lucli-macos
           MACOS_SHA=$(shasum -a 256 /tmp/lucli-macos | awk '{print $1}')
           require_sha "MACOS_SHA" "$MACOS_SHA"
           echo "macos_sha=$MACOS_SHA" >> "$GITHUB_OUTPUT"
 
-          curl -sfL "https://github.com/bpamiri/LuCLI/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" -o /tmp/lucli-linux
+          curl -sfL "https://github.com/${LUCLI_REPO}/releases/download/v${LUCLI_VER}/lucli-${LUCLI_VER}-linux" -o /tmp/lucli-linux
           LINUX_SHA=$(shasum -a 256 /tmp/lucli-linux | awk '{print $1}')
           require_sha "LINUX_SHA" "$LINUX_SHA"
           echo "linux_sha=$LINUX_SHA" >> "$GITHUB_OUTPUT"
@@ -234,6 +236,7 @@ jobs:
         if: steps.check.outputs.needs_update == 'true'
         env:
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          LUCLI_REPO: ${{ steps.check.outputs.lucli_repo }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
           MACOS_SHA: ${{ steps.hashes.outputs.macos_sha }}
           LINUX_SHA: ${{ steps.hashes.outputs.linux_sha }}
@@ -253,6 +256,24 @@ jobs:
             fi
           done
 
+          # brew compares `version MODULE_VERSION` plus `revision`. A module bump
+          # starts a new version, so any revision is dropped; an update with the
+          # same module (a runtime change or a hash repair) must bump the revision,
+          # or `brew upgrade` never offers it.
+          OLD_MODULE=$(sed -n 's/^  MODULE_VERSION = "\(.*\)"$/\1/p' Formula/wheels-be.rb)
+          OLD_REVISION=$(sed -n 's/^  revision \([0-9][0-9]*\)$/\1/p' Formula/wheels-be.rb)
+          if [ "$OLD_MODULE" != "$MODULE_VER" ]; then
+            sed -i '' '/^  revision [0-9][0-9]*$/d' Formula/wheels-be.rb
+          else
+            NEW_REVISION=$(( ${OLD_REVISION:-0} + 1 ))
+            if [ -n "$OLD_REVISION" ]; then
+              sed -i '' "s/^  revision [0-9][0-9]*$/  revision ${NEW_REVISION}/" Formula/wheels-be.rb
+            else
+              perl -pi -e 's/^(  version MODULE_VERSION)$/$1\n  revision '"${NEW_REVISION}"'/' Formula/wheels-be.rb
+            fi
+          fi
+
+          sed -i '' "s|LUCLI_REPO = \".*\"|LUCLI_REPO = \"${LUCLI_REPO}\"|" Formula/wheels-be.rb
           sed -i '' "s/LUCLI_VERSION = \".*\"/LUCLI_VERSION = \"${LUCLI_VER}\"/" Formula/wheels-be.rb
           sed -i '' "s/MODULE_VERSION = \".*\"/MODULE_VERSION = \"${MODULE_VER}\"/" Formula/wheels-be.rb
 
@@ -352,6 +373,7 @@ jobs:
           # See checkout step at top of job for full rationale.
           GH_TOKEN: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          LUCLI_REPO: ${{ steps.check.outputs.lucli_repo }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
           CURRENT_LUCLI: ${{ steps.check.outputs.current_lucli }}
           CURRENT_MODULE: ${{ steps.check.outputs.current_module }}
@@ -399,6 +421,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
           LUCLI_VER: ${{ steps.check.outputs.latest_lucli }}
+          LUCLI_REPO: ${{ steps.check.outputs.lucli_repo }}
           MODULE_VER: ${{ steps.check.outputs.latest_module }}
         run: |
           set -euo pipefail
