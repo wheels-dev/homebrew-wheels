@@ -236,6 +236,21 @@ jobs:
           require_sha "LINUX_SHA" "$LINUX_SHA"
           echo "linux_sha=$LINUX_SHA" >> "$GITHUB_OUTPUT"
 
+          # The shared pin carries the published SHA-256 of each launcher. A
+          # download that does not match it (a swapped or re-uploaded asset)
+          # must not reach the formula.
+          for os_name in macos linux; do
+            PINNED=$(jq -er --arg k "$os_name" '.LUCLI_SHA256[$k] | select(test("^[0-9a-f]{64}$"))' /tmp/wheels-lucli.json) || {
+              echo "::error::tools/lucli.json has no valid LUCLI_SHA256.${os_name}; refusing to update the formula." >&2
+              exit 1
+            }
+            GOT_VAR="$(echo "$os_name" | tr '[:lower:]' '[:upper:]')_SHA"
+            if [ "${!GOT_VAR}" != "$PINNED" ]; then
+              echo "::error::LuCLI ${LUCLI_VER} ${os_name} launcher is ${!GOT_VAR}, but the pin says ${PINNED}; refusing to update the formula." >&2
+              exit 1
+            fi
+          done
+
           # Module tarball is required now that MODULE_VERSION validation is strict —
           # fail the workflow if the advertised release doesn't actually have the asset.
           fetch_retry "https://github.com/wheels-dev/wheels/releases/download/v${MODULE_VER}/wheels-module-${MODULE_VER}.tar.gz" /tmp/wheels-module.tar.gz
