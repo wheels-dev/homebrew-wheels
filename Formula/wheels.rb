@@ -4,7 +4,7 @@ class Wheels < Formula
 
   LUCLI_REPO = "wheels-dev/LuCLI"
   LUCLI_VERSION = "0.6.2.1"
-  MODULE_VERSION = "4.1.0"
+  MODULE_VERSION = "4.1.1"
   SQLITE_JDBC_VERSION = "3.49.1.0"
 
   # Track the framework version, not the LuCLI wrapper version. The wheels
@@ -12,7 +12,6 @@ class Wheels < Formula
   # upgrade check must compare MODULE_VERSION — otherwise `brew upgrade` is
   # a silent no-op for module-only bumps (the common case).
   version MODULE_VERSION
-  revision 1
   license "Apache-2.0"
 
   # on_macos / on_linux blocks, not a class-level `if OS.mac?`. Homebrew now
@@ -31,12 +30,12 @@ class Wheels < Formula
 
   resource "wheels_module" do
     url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-module-#{MODULE_VERSION}.tar.gz"
-    sha256 "36e986f225ff26b34bf125b1894cf00b4c2479689e2c8fd7291a896bae4bc524"
+    sha256 "bb4f9e6bec10e660f0c7815ddee4394b4491b71cc165ae4aab65e3e28f6cd46d"
   end
 
   resource "wheels_core" do
     url "https://github.com/wheels-dev/wheels/releases/download/v#{MODULE_VERSION}/wheels-core-#{MODULE_VERSION}.zip"
-    sha256 "b44daf7a23248a15cb67f7260cb1066bfde2eebfa312d97df9a6ab796f241957"
+    sha256 "718d957dea580558898fe058d1184e38cf35e4c30f353df87828d6cc2c397763"
   end
 
   # SQLite JDBC driver for the zero-config datasource emitted by `wheels new`.
