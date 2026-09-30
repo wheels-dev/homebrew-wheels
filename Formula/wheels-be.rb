@@ -4,7 +4,7 @@ class WheelsBe < Formula
 
   LUCLI_REPO = "wheels-dev/LuCLI"
   LUCLI_VERSION = "0.6.2.1"
-  MODULE_VERSION = "4.1.2-snapshot.2641"
+  MODULE_VERSION = "4.1.2-snapshot.2642"
   SQLITE_JDBC_VERSION = "3.49.1.0"
 
   # Track the framework version, not the LuCLI wrapper version. The wheels
@@ -30,12 +30,12 @@ class WheelsBe < Formula
 
   resource "wheels_module" do
     url "https://github.com/wheels-dev/wheels-snapshots/releases/download/v#{MODULE_VERSION}/wheels-module-#{MODULE_VERSION}.tar.gz"
-    sha256 "0d541cadb3aea5d7d8a48cebbc404d21dc42e7d946111444ad973243316573bc"
+    sha256 "d0a95bf2928d2937cd4a3bf9fbdee9723a4293467e43a7bfe0c6a265bf0bbe9d"
   end
 
   resource "wheels_core" do
     url "https://github.com/wheels-dev/wheels-snapshots/releases/download/v#{MODULE_VERSION}/wheels-core-#{MODULE_VERSION}.zip"
-    sha256 "0137585d18e7267f5b3be3e6d23d27e9f2dc1fa75102094599898105c0ac781a"
+    sha256 "4fa4e605dcf16d0ef54cfeb4b9a7cfe0973ee150a748f2b7ede0c9f79b7213a5"
   end
 
   # The offline documentation bundle: the prebuilt Astro/Starlight guides and
@@ -46,7 +46,7 @@ class WheelsBe < Formula
   # (~32 MB); the full multi-version site is ~1.3 GB.
   resource "wheels_docs" do
     url "https://github.com/wheels-dev/wheels-snapshots/releases/download/v#{MODULE_VERSION}/wheels-docs-#{MODULE_VERSION}.zip"
-    sha256 "325f58415bac0e3bada2ae8055be1a9418585dfc47d85966c4b78afa5a19644f"
+    sha256 "f26a4b2c35d8fcaff8cbceda52dbd8633a2729ab3588f19beff5a30f4170049f"
   end
 
   # SQLite JDBC driver for the zero-config datasource emitted by `wheels new`.
