@@ -4,6 +4,22 @@ on:
   pull_request:
 
 jobs:
+  wrapper-tests:
+    # Plain bash + ruby tests of the wrapper text the formulae generate; no
+    # tap or install needed. macOS runs them under /bin/bash 3.2, as the
+    # installed wrapper runs there.
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: wheels-be docs mirror
+        env:
+          BASH_BIN: ${{ runner.os == 'macOS' && '/bin/bash' || '' }}
+        run: bash tests/wheels-be-docs-mirror.sh
+
   audit:
     runs-on: macos-latest
     steps:

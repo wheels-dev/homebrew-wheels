@@ -577,17 +577,42 @@ class WheelsBe < Formula
         cp -R "$WHEELS_DOCS_SRC/"* "$WHEELS_DOCS_DST/" 2>/dev/null || true
       fi
 
+      # --- docs-mirror begin ---------------------------------------------------
+      # tests/wheels-be-docs-mirror.sh renders and runs this block.
       # Mirror the bundle into the current app's webroot when we are in one.
       # Required, not a convenience: the dev server's Lucee urlRewrite only
       # routes extension-less paths to the front controller, so the bundle's
       # extension-bearing asset URLs must be real files under the webroot for
-      # the container to serve them. Hardlinked so the shared cache is not
-      # duplicated per app. Only runs when cwd is a Wheels project.
-      if [ -f "./vendor/wheels/wheels.json" ] && [ -d "./public" ] && [ -d "$WHEELS_DOCS_DST" ]; then
-        rm -rf "./public/wheels-docs"
-        cp -R -l "$WHEELS_DOCS_DST" "./public/wheels-docs" 2>/dev/null \
-          || cp -R "$WHEELS_DOCS_DST" "./public/wheels-docs"
+      # the container to serve them.
+      # Copied only when missing or when its manifest.json differs from the
+      # cache's (a brew upgrade). A public/wheels-docs without manifest.json is
+      # the user's own and is left alone; one with it is a docs mirror, whether
+      # this wrapper, an older one or `wheels docs` made it. A plain copy, not
+      # hardlinks, so edits in the app cannot change the shared cache; it is
+      # built beside the target and renamed in. A failure warns and the command
+      # still runs. The manifest is compared in bash rather than with cmp.
+      # Same semantics as the Linux package launcher (wheels-dev/wheels#3821).
+      WHEELS_DOCS_MIRROR="./public/wheels-docs"
+      _wheels_docs_mirror() {
+        local tmp="./public/.wheels-docs-new.$$" old="./public/.wheels-docs-old.$$"
+        # Clear leftovers from runs that were killed mid-copy.
+        rm -rf ./public/.wheels-docs-new.* ./public/.wheels-docs-old.*
+        cp -R "$WHEELS_DOCS_DST" "$tmp" || { rm -rf "$tmp"; return 1; }
+        if [ -e "$WHEELS_DOCS_MIRROR" ]; then
+          mv "$WHEELS_DOCS_MIRROR" "$old" || { rm -rf "$tmp"; return 1; }
+        fi
+        mv "$tmp" "$WHEELS_DOCS_MIRROR" || { mv "$old" "$WHEELS_DOCS_MIRROR"; rm -rf "$tmp"; return 1; }
+        rm -rf "$old"
+      }
+      if [ -f "./vendor/wheels/wheels.json" ] && [ -d "./public" ] && [ -f "$WHEELS_DOCS_DST/manifest.json" ]; then
+        wheels_docs_manifest="$(cat "$WHEELS_DOCS_DST/manifest.json" 2>/dev/null)" || true
+        if [ ! -e "$WHEELS_DOCS_MIRROR" ] || { [ -f "$WHEELS_DOCS_MIRROR/manifest.json" ] &&
+            [ "$(cat "$WHEELS_DOCS_MIRROR/manifest.json" 2>/dev/null)" != "$wheels_docs_manifest" ]; }; then
+          _wheels_docs_mirror 2>/dev/null ||
+            echo "wheels: could not copy the offline docs into public/wheels-docs; continuing" >&2
+        fi
       fi
+      # --- docs-mirror end -----------------------------------------------------
 
       # Drop sqlite-jdbc into LuCLI's extracted Lucee lib/ext/ if missing. The
       # express dir only exists after first LuCLI run, so this is a no-op on
@@ -619,9 +644,10 @@ class WheelsBe < Formula
       The prebuilt guides and API reference are installed offline under:
         ~/.wheels/docs/#{MODULE_VERSION}/
 
-      and mirrored into an app's public/wheels-docs/ when you run `wheels` from
-      inside a project, so /wheels-docs/guides/ and /wheels-docs/api/ work with
-      no internet connection.
+      and copied into an app's public/wheels-docs/ (when missing or out of
+      date) when you run `wheels` from inside a project, so
+      /wheels-docs/guides/ and /wheels-docs/api/ work with no internet
+      connection.
 
       The wrapper sets LUCLI_HOME=~/.wheels so all runtime state
       (modules, servers, deps, secrets) lives under that directory
