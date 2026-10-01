@@ -3,8 +3,8 @@ class WheelsBe < Formula
   homepage "https://wheels.dev"
 
   LUCLI_REPO = "wheels-dev/LuCLI"
-  LUCLI_VERSION = "0.6.2.1"
-  MODULE_VERSION = "4.1.3-snapshot.2682"
+  LUCLI_VERSION = "0.6.2.2"
+  MODULE_VERSION = "4.1.3-snapshot.2683"
   SQLITE_JDBC_VERSION = "3.49.1.0"
 
   # Track the framework version, not the LuCLI wrapper version. The wheels
@@ -21,21 +21,21 @@ class WheelsBe < Formula
   # `brew tap wheels-dev/wheels` refuse outright on current Homebrew.
   on_macos do
     url "https://github.com/#{LUCLI_REPO}/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
-    sha256 "edcc131e2101c2e5ec08a235f6ac16e5bbdcd8e3f3ea167cb115704f515a0844"
+    sha256 "b89395539858d82d2ed154c238346485c8b07bba88778fa1b2b539ea501c60ae"
   end
   on_linux do
     url "https://github.com/#{LUCLI_REPO}/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-linux"
-    sha256 "edcc131e2101c2e5ec08a235f6ac16e5bbdcd8e3f3ea167cb115704f515a0844"
+    sha256 "b89395539858d82d2ed154c238346485c8b07bba88778fa1b2b539ea501c60ae"
   end
 
   resource "wheels_module" do
     url "https://github.com/wheels-dev/wheels-snapshots/releases/download/v#{MODULE_VERSION}/wheels-module-#{MODULE_VERSION}.tar.gz"
-    sha256 "02cae23b91658060c16842f0087062afb5bcd758b426eeecc7def33e026ba823"
+    sha256 "95e006ee2cd381adc359657b9e5de6e738fe315dba0f83fd89d74ca079d8c49a"
   end
 
   resource "wheels_core" do
     url "https://github.com/wheels-dev/wheels-snapshots/releases/download/v#{MODULE_VERSION}/wheels-core-#{MODULE_VERSION}.zip"
-    sha256 "9492afedac213eae4d92a4c45fbeeb752043c828ffa1223725c11850be08ee29"
+    sha256 "593fb9eb3229a38de991ee1f1421b008c305b1eedd7f85d540351e5189b7acff"
   end
 
   # The offline documentation bundle: the prebuilt Astro/Starlight guides and
@@ -46,7 +46,7 @@ class WheelsBe < Formula
   # (~32 MB); the full multi-version site is ~1.3 GB.
   resource "wheels_docs" do
     url "https://github.com/wheels-dev/wheels-snapshots/releases/download/v#{MODULE_VERSION}/wheels-docs-#{MODULE_VERSION}.zip"
-    sha256 "af04682155b183a727677d35ed47ea8818133986392219d07cd7ffcc4a00a9f4"
+    sha256 "87f21ede929ff0024828b7bc0b59cb03362d6fbc81521b51528468c519d64149"
   end
 
   # SQLite JDBC driver for the zero-config datasource emitted by `wheels new`.
