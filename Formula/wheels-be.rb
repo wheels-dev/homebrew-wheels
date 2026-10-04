@@ -152,6 +152,13 @@ class WheelsBe < Formula
         dst_ver=""
         [ -f "$WHEELS_VERSION_DST" ] && dst_ver=$(cat "$WHEELS_VERSION_DST")
         if [ "$src_ver" != "$dst_ver" ]; then
+          # Replace the module copy instead of copying over it: cp -R keeps
+          # files an older version shipped and this one dropped, and
+          # `wheels new` copies them into every new app (an old generator
+          # template in app/snippets/ overrides the current one, and old
+          # framework files land in vendor/wheels/). The framework copy
+          # below lives inside the module directory, so it is replaced too.
+          rm -rf "$WHEELS_MODULE_DST"
           mkdir -p "$WHEELS_MODULE_DST"
           cp -R "$WHEELS_MODULE_SRC/"* "$WHEELS_MODULE_DST/"
           if [ -d "$WHEELS_FRAMEWORK_SRC" ]; then
