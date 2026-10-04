@@ -12,7 +12,9 @@
 # renders them (a Ruby <<~EOS heredoc), with opt_prefix pointing at a fake
 # package and HOME at a temp dir, so nothing touches the real ~/.wheels. The
 # rendered text runs under `bash -euo pipefail` against an "installed" 1.0
-# copy, then the test checks what a 2.0 upgrade left behind.
+# copy, then the test checks what a 2.0 upgrade left behind, and that a 3.0
+# copy which fails part way leaves 2.0 and its version marker in place so the
+# next run retries.
 #
 # Needs only bash and ruby. FORMULAS overrides the formulae under test;
 # BASH_BIN the shell the blocks run under (macOS runs the wrapper with
@@ -103,6 +105,37 @@ for formula in ${FORMULAS}; do
   [ -f "${installed}/marker.txt" ] \
     && pass "${name}: an unchanged version leaves the installed copy alone" \
     || fail "${name}: an unchanged version replaced the installed copy"
+
+  # A copy that fails part way (here an unreadable file in the 3.0 package)
+  # must leave the installed 2.0 copy and its marker alone, so the next run
+  # retries; once the package is readable, that retry installs 3.0.
+  echo "3.0" > "${prefix}/share/wheels/.module-version"
+  echo "secret" > "${prefix}/share/wheels/module/unreadable.txt"
+  chmod 000 "${prefix}/share/wheels/module/unreadable.txt"
+  if cat "${prefix}/share/wheels/module/unreadable.txt" > /dev/null 2>&1; then
+    echo "skip - ${name}: failed-copy case (this user can read a mode-000 file)"
+  else
+    HOME="${home}" "${BASH_BIN}" -euo pipefail "${case_dir}/sync.sh" > "${case_dir}/out.txt" 2>&1
+    [ "$(cat "${installed}/.module-version" 2>/dev/null)" = "2.0" ] \
+      && pass "${name}: a failed copy keeps the old version marker" \
+      || fail "${name}: a failed copy recorded version $(cat "${installed}/.module-version" 2>/dev/null)"
+    [ -f "${installed}/marker.txt" ] && [ -f "${installed}/vendor/wheels/model/associations.cfm" ] \
+      && pass "${name}: a failed copy leaves the installed copy in place" \
+      || fail "${name}: a failed copy damaged the installed copy"
+    leftovers=$(find "${home}/.wheels/modules" -maxdepth 1 -name 'wheels.new.*' | wc -l | tr -d ' ')
+    [ "${leftovers}" = "0" ] \
+      && pass "${name}: a failed copy leaves no partial copy behind" \
+      || fail "${name}: a failed copy left ${leftovers} partial copies"
+    grep -q "will retry on the next run" "${case_dir}/out.txt" \
+      && pass "${name}: a failed copy says it will retry" \
+      || fail "${name}: a failed copy printed nothing"
+
+    chmod 644 "${prefix}/share/wheels/module/unreadable.txt"
+    HOME="${home}" "${BASH_BIN}" -euo pipefail "${case_dir}/sync.sh" > /dev/null 2>&1
+    [ "$(cat "${installed}/.module-version" 2>/dev/null)" = "3.0" ] && [ ! -e "${installed}/marker.txt" ] \
+      && pass "${name}: the next run retries and installs the new version" \
+      || fail "${name}: the next run did not install the new version"
+  fi
 done
 
 echo
