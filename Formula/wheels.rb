@@ -136,13 +136,29 @@ class Wheels < Formula
         dst_ver=""
         [ -f "$WHEELS_VERSION_DST" ] && dst_ver=$(cat "$WHEELS_VERSION_DST")
         if [ "$src_ver" != "$dst_ver" ]; then
-          mkdir -p "$WHEELS_MODULE_DST"
-          cp -R "$WHEELS_MODULE_SRC/"* "$WHEELS_MODULE_DST/"
-          if [ -d "$WHEELS_FRAMEWORK_SRC" ]; then
-            mkdir -p "$WHEELS_FRAMEWORK_DST"
-            cp -R "$WHEELS_FRAMEWORK_SRC/"* "$WHEELS_FRAMEWORK_DST/"
+          # Build the new module copy beside the installed one, then swap it in.
+          # Copying over the installed copy (cp -R) kept files an older version
+          # shipped and this one dropped, and `wheels new` copies them into every
+          # new app (an old generator template in app/snippets/ overrides the
+          # current one; old framework files land in vendor/wheels/). The version
+          # marker is written into the new copy last, so a copy that fails part
+          # way leaves the installed copy and its old marker alone, and the next
+          # run tries again. The framework copy lives inside the module directory.
+          wheels_module_new="$WHEELS_MODULE_DST.new.$$"
+          wheels_framework_new="$wheels_module_new${WHEELS_FRAMEWORK_DST#"$WHEELS_MODULE_DST"}"
+          rm -rf "$wheels_module_new"
+          if mkdir -p "$wheels_module_new" \
+            && cp -R "$WHEELS_MODULE_SRC/"* "$wheels_module_new/" \
+            && { [ ! -d "$WHEELS_FRAMEWORK_SRC" ] \
+              || { mkdir -p "$wheels_framework_new" && cp -R "$WHEELS_FRAMEWORK_SRC/"* "$wheels_framework_new/"; }; } \
+            && cp "$WHEELS_VERSION_SRC" "$wheels_module_new/.module-version" \
+            && rm -rf "$WHEELS_MODULE_DST" \
+            && mv "$wheels_module_new" "$WHEELS_MODULE_DST"; then
+            :
+          else
+            rm -rf "$wheels_module_new"
+            echo "wheels: could not update $WHEELS_MODULE_DST; will retry on the next run" >&2
           fi
-          cp "$WHEELS_VERSION_SRC" "$WHEELS_VERSION_DST"
         fi
       fi
 

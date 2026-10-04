@@ -20,6 +20,11 @@ jobs:
           BASH_BIN: ${{ runner.os == 'macOS' && '/bin/bash' || '' }}
         run: bash tests/wheels-be-docs-mirror.sh
 
+      - name: module sync replaces the installed copy
+        env:
+          BASH_BIN: ${{ runner.os == 'macOS' && '/bin/bash' || '' }}
+        run: bash tests/module-sync.sh
+
   audit:
     runs-on: macos-latest
     steps:
