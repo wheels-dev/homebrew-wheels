@@ -259,21 +259,40 @@ jobs:
           require_sha "LINUX_SHA" "$LINUX_SHA"
           echo "linux_sha=$LINUX_SHA" >> "$GITHUB_OUTPUT"
 
-          # Check each launcher against the SHA-256 the chosen LuCLI release
-          # publishes (checksums_sha256.txt). The stable formula's version comes
-          # from its release line's tested list, not develop's pin, so develop's
-          # LUCLI_SHA256 may describe a different runtime. A download that does
-          # not match (a swapped or re-uploaded asset) must not reach the formula.
+          # Check each launcher against TWO sources that must both agree:
+          #  1. the SHA-256 the chosen LuCLI release publishes (checksums_sha256.txt);
+          #  2. an independent pin committed in a reviewed repo for that exact
+          #     version: wheels' develop tools/lucli.json when it pins this
+          #     version, else the sha256 this formula already declares when the
+          #     version is unchanged. checksums_sha256.txt comes from the same
+          #     release as the launcher, so on its own it can't catch a swapped
+          #     asset. With no committed pin for the version, stop and ask a human.
           fetch_retry "https://github.com/${LUCLI_REPO}/releases/download/v${LUCLI_VER}/checksums_sha256.txt" /tmp/lucli-checksums.txt
+          DEVELOP_PIN_VER=$(jq -r '.LUCLI_VERSION' /tmp/wheels-lucli.json)
+          FORMULA_VER=$(sed -n 's/^  LUCLI_VERSION = "\(.*\)"/\1/p' Formula/wheels.rb)
           for os_name in macos linux; do
-            PINNED=$(awk -v f="lucli-${LUCLI_VER}-${os_name}" '$2 == f { print $1 }' /tmp/lucli-checksums.txt | grep -E '^[0-9a-f]{64}$' | head -1) || true
-            if [ -z "$PINNED" ]; then
+            RELEASE_SHA=$(awk -v f="lucli-${LUCLI_VER}-${os_name}" '$2 == f { print $1 }' /tmp/lucli-checksums.txt | grep -E '^[0-9a-f]{64}$' | head -1) || true
+            if [ -z "$RELEASE_SHA" ]; then
               echo "::error::LuCLI ${LUCLI_VER}'s checksums_sha256.txt has no valid entry for lucli-${LUCLI_VER}-${os_name}; refusing to update the formula." >&2
               exit 1
             fi
+            if [ "$DEVELOP_PIN_VER" = "$LUCLI_VER" ]; then
+              ANCHOR=$(jq -r --arg k "$os_name" '.LUCLI_SHA256[$k] // empty' /tmp/wheels-lucli.json)
+              ANCHOR_SRC="wheels develop tools/lucli.json"
+            elif [ "$FORMULA_VER" = "$LUCLI_VER" ]; then
+              ANCHOR=$(grep -A1 -E "lucli-#\{LUCLI_VERSION\}-${os_name}\"" Formula/wheels.rb | sed -n 's/.*sha256 "\([0-9a-f]\{64\}\)".*/\1/p' | head -1)
+              ANCHOR_SRC="Formula/wheels.rb (current, unchanged version)"
+            else
+              echo "::error::No committed SHA-256 pin for LuCLI ${LUCLI_VER} (develop pins ${DEVELOP_PIN_VER}, the formula has ${FORMULA_VER}). Add the hash by hand after checking it; refusing to update the formula." >&2
+              exit 1
+            fi
+            if ! printf '%s' "$ANCHOR" | grep -qE '^[0-9a-f]{64}$'; then
+              echo "::error::${ANCHOR_SRC} has no valid SHA-256 for the ${os_name} launcher; refusing to update the formula." >&2
+              exit 1
+            fi
             GOT_VAR="$(echo "$os_name" | tr '[:lower:]' '[:upper:]')_SHA"
-            if [ "${!GOT_VAR}" != "$PINNED" ]; then
-              echo "::error::LuCLI ${LUCLI_VER} ${os_name} launcher is ${!GOT_VAR}, but the release's checksums_sha256.txt says ${PINNED}; refusing to update the formula." >&2
+            if [ "${!GOT_VAR}" != "$RELEASE_SHA" ] || [ "${!GOT_VAR}" != "$ANCHOR" ]; then
+              echo "::error::LuCLI ${LUCLI_VER} ${os_name} launcher is ${!GOT_VAR}; release checksums say ${RELEASE_SHA}, ${ANCHOR_SRC} says ${ANCHOR}. Refusing to update the formula." >&2
               exit 1
             fi
           done
