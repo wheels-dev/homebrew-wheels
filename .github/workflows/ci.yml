@@ -25,6 +25,11 @@ jobs:
           BASH_BIN: ${{ runner.os == 'macOS' && '/bin/bash' || '' }}
         run: bash tests/module-sync.sh
 
+      - name: stable formula picks a LuCLI tested with its release line
+        env:
+          BASH_BIN: ${{ runner.os == 'macOS' && '/bin/bash' || '' }}
+        run: bash tests/stable-lucli-version.sh
+
   audit:
     runs-on: macos-latest
     steps:

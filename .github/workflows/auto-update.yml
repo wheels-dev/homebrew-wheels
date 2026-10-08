@@ -122,7 +122,6 @@ jobs:
           LATEST_LUCLI=$(jq -er '.LUCLI_VERSION | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?$"))' /tmp/wheels-lucli.json)
           CURRENT_LUCLI_REPO=$(sed -n 's/^  LUCLI_REPO = "\(.*\)"/\1/p' Formula/wheels.rb)
           echo "lucli_repo=$LUCLI_REPO" >> "$GITHUB_OUTPUT"
-          echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 
           # Module version resolution.
           #
@@ -165,6 +164,22 @@ jobs:
           fi
           validate_version "LATEST_MODULE" "$LATEST_MODULE"
           echo "latest_module=$LATEST_MODULE" >> "$GITHUB_OUTPUT"
+
+          # The stable formula ships a released module, so it must ship a LuCLI
+          # tested with that release line, not develop's pin above (it moves
+          # ahead to the next line's runtime). scripts/stable-lucli-version.sh
+          # picks the highest version listed for the line in develop's
+          # tools/lucli-tested.json, else the pin at the release's own tag.
+          curl --fail --silent --location --retry 3 \
+            https://raw.githubusercontent.com/wheels-dev/wheels/develop/tools/lucli-tested.json \
+            --output /tmp/wheels-lucli-tested.json || rm -f /tmp/wheels-lucli-tested.json
+          curl --fail --silent --location --retry 3 \
+            "https://raw.githubusercontent.com/wheels-dev/wheels/v${LATEST_MODULE}/tools/lucli.json" \
+            --output /tmp/wheels-lucli-tag.json || rm -f /tmp/wheels-lucli-tag.json
+          LATEST_LUCLI=$(bash scripts/stable-lucli-version.sh "$LATEST_MODULE" /tmp/wheels-lucli-tested.json /tmp/wheels-lucli-tag.json)
+          validate_version "LATEST_LUCLI" "$LATEST_LUCLI"
+          echo "LuCLI for the stable ${LATEST_MODULE} formula: ${LATEST_LUCLI} (develop pin: $(jq -r .LUCLI_VERSION /tmp/wheels-lucli.json))"
+          echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 
           NEEDS_UPDATE="false"
           if [ "$CURRENT_LUCLI" != "$LATEST_LUCLI" ] || [ "$CURRENT_LUCLI_REPO" != "$LUCLI_REPO" ]; then
