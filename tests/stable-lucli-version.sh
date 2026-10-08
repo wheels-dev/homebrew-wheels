@@ -25,6 +25,7 @@ check "4.1.2 picks the highest tested 4.1 runtime, not develop's 0.6.2.3" "0.6.2
 check "4.2.0 picks its own line's tested runtime"                        "0.6.2.3" 4.2.0 "$T/tested.json" "$T/tag-412.json"
 check "a line with no entry falls back to its tag's pin"                  "0.6.3.0" 4.3.0 "$T/tested.json" "$T/tag-430.json"
 check "a missing tested file falls back to the tag's pin"                 "0.6.2.1" 4.1.2 "" "$T/tag-412.json"
-check "numeric, not lexical, ordering"                                     "0.6.2.10" 4.4.0 <(echo '{"lines":{"4.4":["0.6.2.9","0.6.2.10"]}}') "$T/tag-412.json"
+echo '{"lines":{"4.4":["0.6.2.9","0.6.2.10"]}}' > "$T/tested-44.json"
+check "numeric, not lexical, ordering"                                     "0.6.2.10" 4.4.0 "$T/tested-44.json" "$T/tag-412.json"
 check "no entry and no tag file is an error"                              "ERROR" 4.5.0 "$T/tested.json" ""
 exit $fail
