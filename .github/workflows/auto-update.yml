@@ -262,14 +262,16 @@ jobs:
           # Check each launcher against TWO sources that must both agree:
           #  1. the SHA-256 the chosen LuCLI release publishes (checksums_sha256.txt);
           #  2. an independent pin committed in a reviewed repo for that exact
-          #     version: wheels' develop tools/lucli.json when it pins this
-          #     version, else the sha256 this formula already declares when the
-          #     version is unchanged. checksums_sha256.txt comes from the same
+          #     version, first that pins it of: wheels' develop tools/lucli.json,
+          #     tools/lucli.json at the release's own tag (v<module>), or the
+          #     sha256 this formula already declares when the version is unchanged. checksums_sha256.txt comes from the same
           #     release as the launcher, so on its own it can't catch a swapped
           #     asset. With no committed pin for the version, stop and ask a human.
           fetch_retry "https://github.com/${LUCLI_REPO}/releases/download/v${LUCLI_VER}/checksums_sha256.txt" /tmp/lucli-checksums.txt
           DEVELOP_PIN_VER=$(jq -r '.LUCLI_VERSION' /tmp/wheels-lucli.json)
           FORMULA_VER=$(sed -n 's/^  LUCLI_VERSION = "\(.*\)"/\1/p' Formula/wheels.rb)
+          TAG_PIN_VER=""
+          [ -s /tmp/wheels-lucli-tag.json ] && TAG_PIN_VER=$(jq -r '.LUCLI_VERSION // empty' /tmp/wheels-lucli-tag.json)
           for os_name in macos linux; do
             RELEASE_SHA=$(awk -v f="lucli-${LUCLI_VER}-${os_name}" '$2 == f { print $1 }' /tmp/lucli-checksums.txt | grep -E '^[0-9a-f]{64}$' | head -1) || true
             if [ -z "$RELEASE_SHA" ]; then
@@ -279,11 +281,14 @@ jobs:
             if [ "$DEVELOP_PIN_VER" = "$LUCLI_VER" ]; then
               ANCHOR=$(jq -r --arg k "$os_name" '.LUCLI_SHA256[$k] // empty' /tmp/wheels-lucli.json)
               ANCHOR_SRC="wheels develop tools/lucli.json"
+            elif [ -n "$TAG_PIN_VER" ] && [ "$TAG_PIN_VER" = "$LUCLI_VER" ]; then
+              ANCHOR=$(jq -r --arg k "$os_name" '.LUCLI_SHA256[$k] // empty' /tmp/wheels-lucli-tag.json)
+              ANCHOR_SRC="wheels tools/lucli.json at v${MODULE_VER}"
             elif [ "$FORMULA_VER" = "$LUCLI_VER" ]; then
               ANCHOR=$(grep -A1 -E "lucli-#\{LUCLI_VERSION\}-${os_name}\"" Formula/wheels.rb | sed -n 's/.*sha256 "\([0-9a-f]\{64\}\)".*/\1/p' | head -1)
               ANCHOR_SRC="Formula/wheels.rb (current, unchanged version)"
             else
-              echo "::error::No committed SHA-256 pin for LuCLI ${LUCLI_VER} (develop pins ${DEVELOP_PIN_VER}, the formula has ${FORMULA_VER}). Add the hash by hand after checking it; refusing to update the formula." >&2
+              echo "::error::No committed SHA-256 pin for LuCLI ${LUCLI_VER} (develop pins ${DEVELOP_PIN_VER}, v${MODULE_VER} pins ${TAG_PIN_VER:-none}, the formula has ${FORMULA_VER}). Add the hash by hand after checking it; refusing to update the formula." >&2
               exit 1
             fi
             if ! printf '%s' "$ANCHOR" | grep -qE '^[0-9a-f]{64}$'; then
