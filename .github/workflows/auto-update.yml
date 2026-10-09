@@ -122,7 +122,6 @@ jobs:
           LATEST_LUCLI=$(jq -er '.LUCLI_VERSION | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?$"))' /tmp/wheels-lucli.json)
           CURRENT_LUCLI_REPO=$(sed -n 's/^  LUCLI_REPO = "\(.*\)"/\1/p' Formula/wheels.rb)
           echo "lucli_repo=$LUCLI_REPO" >> "$GITHUB_OUTPUT"
-          echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 
           # Module version resolution.
           #
@@ -165,6 +164,30 @@ jobs:
           fi
           validate_version "LATEST_MODULE" "$LATEST_MODULE"
           echo "latest_module=$LATEST_MODULE" >> "$GITHUB_OUTPUT"
+
+          # The stable formula ships a released module, so it must ship a LuCLI
+          # tested with that release line, not develop's pin above (it moves
+          # ahead to the next line's runtime). scripts/stable-lucli-version.sh
+          # picks the highest version listed for the line in develop's
+          # tools/lucli-tested.json, else the pin at the release's own tag.
+          # Only a real 404 (no tested list) may fall back to the tag pin. Any
+          # other failure stops the run: falling back on a transient error could
+          # propose a downgrade (e.g. 0.6.2.2 -> the tag's 0.6.2.1).
+          CODE=$(curl --silent --location --retry 3 --output /tmp/wheels-lucli-tested.json \
+            --write-out '%{http_code}' \
+            https://raw.githubusercontent.com/wheels-dev/wheels/develop/tools/lucli-tested.json) || CODE="curl-error"
+          case "$CODE" in
+            200) ;;
+            404) rm -f /tmp/wheels-lucli-tested.json; echo "No tools/lucli-tested.json on develop; using the tag pin." ;;
+            *) echo "::error::Could not fetch tools/lucli-tested.json (${CODE}); refusing to guess the stable LuCLI." >&2; exit 1 ;;
+          esac
+          curl --fail --silent --location --retry 3 \
+            "https://raw.githubusercontent.com/wheels-dev/wheels/v${LATEST_MODULE}/tools/lucli.json" \
+            --output /tmp/wheels-lucli-tag.json || rm -f /tmp/wheels-lucli-tag.json
+          LATEST_LUCLI=$(bash scripts/stable-lucli-version.sh "$LATEST_MODULE" /tmp/wheels-lucli-tested.json /tmp/wheels-lucli-tag.json)
+          validate_version "LATEST_LUCLI" "$LATEST_LUCLI"
+          echo "LuCLI for the stable ${LATEST_MODULE} formula: ${LATEST_LUCLI} (develop pin: $(jq -r .LUCLI_VERSION /tmp/wheels-lucli.json))"
+          echo "latest_lucli=$LATEST_LUCLI" >> "$GITHUB_OUTPUT"
 
           NEEDS_UPDATE="false"
           if [ "$CURRENT_LUCLI" != "$LATEST_LUCLI" ] || [ "$CURRENT_LUCLI_REPO" != "$LUCLI_REPO" ]; then
@@ -236,17 +259,40 @@ jobs:
           require_sha "LINUX_SHA" "$LINUX_SHA"
           echo "linux_sha=$LINUX_SHA" >> "$GITHUB_OUTPUT"
 
-          # The shared pin carries the published SHA-256 of each launcher. A
-          # download that does not match it (a swapped or re-uploaded asset)
-          # must not reach the formula.
+          # Check each launcher against TWO sources that must both agree:
+          #  1. the SHA-256 the chosen LuCLI release publishes (checksums_sha256.txt);
+          #  2. an independent pin committed in a reviewed repo for that exact
+          #     version: wheels' develop tools/lucli.json when it pins this
+          #     version, else the sha256 this formula already declares when the
+          #     version is unchanged. checksums_sha256.txt comes from the same
+          #     release as the launcher, so on its own it can't catch a swapped
+          #     asset. With no committed pin for the version, stop and ask a human.
+          fetch_retry "https://github.com/${LUCLI_REPO}/releases/download/v${LUCLI_VER}/checksums_sha256.txt" /tmp/lucli-checksums.txt
+          DEVELOP_PIN_VER=$(jq -r '.LUCLI_VERSION' /tmp/wheels-lucli.json)
+          FORMULA_VER=$(sed -n 's/^  LUCLI_VERSION = "\(.*\)"/\1/p' Formula/wheels.rb)
           for os_name in macos linux; do
-            PINNED=$(jq -er --arg k "$os_name" '.LUCLI_SHA256[$k] | select(test("^[0-9a-f]{64}$"))' /tmp/wheels-lucli.json) || {
-              echo "::error::tools/lucli.json has no valid LUCLI_SHA256.${os_name}; refusing to update the formula." >&2
+            RELEASE_SHA=$(awk -v f="lucli-${LUCLI_VER}-${os_name}" '$2 == f { print $1 }' /tmp/lucli-checksums.txt | grep -E '^[0-9a-f]{64}$' | head -1) || true
+            if [ -z "$RELEASE_SHA" ]; then
+              echo "::error::LuCLI ${LUCLI_VER}'s checksums_sha256.txt has no valid entry for lucli-${LUCLI_VER}-${os_name}; refusing to update the formula." >&2
               exit 1
-            }
+            fi
+            if [ "$DEVELOP_PIN_VER" = "$LUCLI_VER" ]; then
+              ANCHOR=$(jq -r --arg k "$os_name" '.LUCLI_SHA256[$k] // empty' /tmp/wheels-lucli.json)
+              ANCHOR_SRC="wheels develop tools/lucli.json"
+            elif [ "$FORMULA_VER" = "$LUCLI_VER" ]; then
+              ANCHOR=$(grep -A1 -E "lucli-#\{LUCLI_VERSION\}-${os_name}\"" Formula/wheels.rb | sed -n 's/.*sha256 "\([0-9a-f]\{64\}\)".*/\1/p' | head -1)
+              ANCHOR_SRC="Formula/wheels.rb (current, unchanged version)"
+            else
+              echo "::error::No committed SHA-256 pin for LuCLI ${LUCLI_VER} (develop pins ${DEVELOP_PIN_VER}, the formula has ${FORMULA_VER}). Add the hash by hand after checking it; refusing to update the formula." >&2
+              exit 1
+            fi
+            if ! printf '%s' "$ANCHOR" | grep -qE '^[0-9a-f]{64}$'; then
+              echo "::error::${ANCHOR_SRC} has no valid SHA-256 for the ${os_name} launcher; refusing to update the formula." >&2
+              exit 1
+            fi
             GOT_VAR="$(echo "$os_name" | tr '[:lower:]' '[:upper:]')_SHA"
-            if [ "${!GOT_VAR}" != "$PINNED" ]; then
-              echo "::error::LuCLI ${LUCLI_VER} ${os_name} launcher is ${!GOT_VAR}, but the pin says ${PINNED}; refusing to update the formula." >&2
+            if [ "${!GOT_VAR}" != "$RELEASE_SHA" ] || [ "${!GOT_VAR}" != "$ANCHOR" ]; then
+              echo "::error::LuCLI ${LUCLI_VER} ${os_name} launcher is ${!GOT_VAR}; release checksums say ${RELEASE_SHA}, ${ANCHOR_SRC} says ${ANCHOR}. Refusing to update the formula." >&2
               exit 1
             fi
           done
