@@ -3,7 +3,7 @@ class Wheels < Formula
   homepage "https://wheels.dev"
 
   LUCLI_REPO = "wheels-dev/LuCLI"
-  LUCLI_VERSION = "0.6.2.3"
+  LUCLI_VERSION = "0.6.2.4"
   MODULE_VERSION = "4.2.1"
   SQLITE_JDBC_VERSION = "3.49.1.0"
 
@@ -12,6 +12,7 @@ class Wheels < Formula
   # upgrade check must compare MODULE_VERSION — otherwise `brew upgrade` is
   # a silent no-op for module-only bumps (the common case).
   version MODULE_VERSION
+  revision 1
   license "Apache-2.0"
 
   # on_macos / on_linux blocks, not a class-level `if OS.mac?`. Homebrew now
@@ -21,11 +22,11 @@ class Wheels < Formula
   # `brew tap wheels-dev/wheels` refuse outright on current Homebrew.
   on_macos do
     url "https://github.com/#{LUCLI_REPO}/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-macos"
-    sha256 "418eebf3843caacacc3a405d51e32a157db8213c1ed1b87ef5b24ebf0148c6f4"
+    sha256 "2edbda21d1584bdc36b652516071df907a3f9003d2ac38dd1cf1c23d1d557859"
   end
   on_linux do
     url "https://github.com/#{LUCLI_REPO}/releases/download/v#{LUCLI_VERSION}/lucli-#{LUCLI_VERSION}-linux"
-    sha256 "418eebf3843caacacc3a405d51e32a157db8213c1ed1b87ef5b24ebf0148c6f4"
+    sha256 "2edbda21d1584bdc36b652516071df907a3f9003d2ac38dd1cf1c23d1d557859"
   end
 
   resource "wheels_module" do
